@@ -1,0 +1,19 @@
+# Gradle / Kotlin
+.gradle/
+.kotlin/
+build/
+
+# Local machine config (SDK path)
+local.properties
+
+# IDEs and OS
+.idea/
+*.iml
+.DS_Store
+captures/
+
+# Build outputs and signing material
+*.apk
+*.aab
+*.jks
+*.keystore

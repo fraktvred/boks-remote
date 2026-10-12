@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A plain speaker box: rounded rectangle with one large and one small driver. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <path android:fillColor="#FFFF6A3D"
+        android:pathData="M38,30h32a6,6 0,0 1,6 6v36a6,6 0,0 1,-6 6h-32a6,6 0,0 1,-6 -6v-36a6,6 0,0 1,6 -6z" />
+    <path android:fillColor="#FF1B1B1F"
+        android:pathData="M54,51m-13,0a13,13 0,1 1,26 0a13,13 0,1 1,-26 0" />
+    <path android:fillColor="#FFFF6A3D"
+        android:pathData="M54,51m-5,0a5,5 0,1 1,10 0a5,5 0,1 1,-10 0" />
+    <path android:fillColor="#FF1B1B1F"
+        android:pathData="M54,70m-3.5,0a3.5,3.5 0,1 1,7 0a3.5,3.5 0,1 1,-7 0" />
+</vector>
