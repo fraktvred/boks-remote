@@ -16,13 +16,26 @@ android {
         versionName = "0.1.0"
     }
 
+    // Published builds are signed with a fixed key so they update in place. It comes from the
+    // environment (CI secrets); without it the release falls back to the local debug key.
+    val releaseKeystore = System.getenv("BOKS_KEYSTORE_FILE")?.let(::file)?.takeIf { it.exists() }
+    signingConfigs {
+        if (releaseKeystore != null) {
+            create("release") {
+                storeFile = releaseKeystore
+                storePassword = System.getenv("BOKS_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("BOKS_KEY_ALIAS")
+                keyPassword = System.getenv("BOKS_KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
-            // Sideload build: signed with the debug key so it installs without a keystore.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
         }
     }
     compileOptions {
