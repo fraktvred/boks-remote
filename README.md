@@ -46,7 +46,7 @@ Dimmer, mode and FX follow as fast as Bluetooth allows. The light stores its pal
 Needs JDK 17 and the Android SDK (`local.properties` points at `~/Library/Android/sdk`).
 
 ```sh
-./gradlew testDebugUnitTest assembleRelease
+./gradlew testReleaseUnitTest assembleRelease
 adb install -r app/build/outputs/apk/release/app-release.apk
 ```
 

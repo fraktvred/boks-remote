@@ -10,18 +10,28 @@ on:
 permissions:
   contents: write # needed to publish releases on tag pushes
 
+# A newer push to the same branch or PR supersedes a running build; tag builds always finish.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: 17
 
-      - uses: gradle/actions/setup-gradle@v4
+      # Caches the Gradle distribution, dependencies and the local build cache. Only builds on
+      # main write to the cache; PRs and tags read from it. "basic" is the open-source cache
+      # implementation, so no extra licence terms apply.
+      - uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-provider: basic
 
       - name: Check tag matches versionName
         if: startsWith(github.ref, 'refs/tags/v')
@@ -47,12 +57,13 @@ jobs:
             echo "No signing key available; building with the debug key."
           fi
 
+      # Testing the release variant reuses its compiled classes instead of also compiling debug.
       - name: Test and build
         env:
           BOKS_KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           BOKS_KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           BOKS_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-        run: ./gradlew testDebugUnitTest assembleRelease
+        run: ./gradlew testReleaseUnitTest assembleRelease
 
       - name: Rename APK
         run: |
@@ -60,10 +71,10 @@ jobs:
           mv app/build/outputs/apk/release/app-release.apk "$name"
           echo "APK=$name" >> "$GITHUB_ENV"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
-          name: boks-remote-apk
           path: ${{ env.APK }}
+          archive: false # downloads as the .apk itself rather than a zip around it
 
       - name: Publish release
         if: startsWith(github.ref, 'refs/tags/v')
