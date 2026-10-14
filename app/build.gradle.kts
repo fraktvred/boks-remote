@@ -15,7 +15,7 @@ android {
         versionCode = 2
         versionName = "0.2.0"
         // Stand-in device names for README screenshots, e.g. "<team ID>=Backyard Mix;<team ID>=Stage light",
-        // so the shots don't show anyone's team ID. Set by tools/screenshots.sh; empty otherwise.
+        // so the shots don't show anyone's team ID. Set by tools/screenshots.py; empty otherwise.
         val screenshotNames = (findProperty("boksremote.screenshotNames") as String?).orEmpty()
         buildConfigField("String", "SCREENSHOT_NAMES", "\"${screenshotNames.replace("\\", "\\\\").replace("\"", "\\\"")}\"")
     }
