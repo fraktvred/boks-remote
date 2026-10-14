@@ -23,7 +23,7 @@ An independent Android controller for SOUNDBOKS speakers and the Lightboks over 
 | Volume and mute, battery, active inputs | ✓ | ✓ | battery |
 | Sound profiles (per-model names, e.g. Bass+ / Outdoor / Indoor) | ✓ | ✓ (RPC) | – |
 | Custom 6-band EQ, saved presets | ✓ | ✓ (RPC) | – |
-| Room tuning by microphone | – | Mix | – |
+| Room tuning by microphone | approx. | Mix; others approx. | – |
 | Team-up solo / host / join, stereo channel | ✓ | ✓ | team-up |
 | Brightness, light mode | – | – | ✓ |
 | Rename, auto power-off | – | ✓ (RPC) | ✓ (RPC) |
@@ -31,10 +31,19 @@ An independent Android controller for SOUNDBOKS speakers and the Lightboks over 
 | Power off | ✓ | ✓ | ✓ |
 
 - **Custom EQ:** drag six bands (±10 dB), hear the change live, and save curves on the phone.
-- **Room tuning:** measure at a few listening spots with the phone or a USB microphone and get a suggested EQ. Only the Mix so far, because each model's EQ bands have to be measured once first.
+- **Room tuning:** measure at a few listening spots with the phone or a USB microphone and get a suggested EQ. Speakers whose EQ bands haven't been [measured](#help-measure-your-speaker) yet use the Mix's and are marked approximate.
 - **Lightboks:** colour palettes, held effects (strobe, blackout, chase, sparkle) and a DMX bridge.
 
 Not supported: firmware updates, registration and anti-theft lock/unlock (these need SOUNDBOKS's servers). Saved EQs stay on the phone rather than syncing to a SOUNDBOKS account.
+
+## Help measure your speaker
+
+Room tuning works best when the app knows where a model's six EQ bands sit. So far only the Mix has been measured; if you own another SOUNDBOKS, you can add yours:
+
+1. Install a debug build (`./gradlew installDebug`) and grant it the microphone (`adb shell pm grant dev.boksremote android.permission.RECORD_AUDIO`).
+2. Connect your speaker, connect the phone's audio to it over Bluetooth, and place the phone about 50 cm in front of it in a quiet room.
+3. Tap **Calibrate bands (debug)** in the Sound profiles card. It plays test tones for about 4 minutes and then restores your EQ and volume.
+4. Pull the result with `adb pull /sdcard/Android/data/dev.boksremote/files/bandcal.csv` and [open an issue](https://github.com/fraktvred/boks-remote/issues/new) with the file, your speaker model and its firmware version.
 
 ## DMX bridge (Lightboks)
 

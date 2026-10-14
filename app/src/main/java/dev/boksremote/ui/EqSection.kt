@@ -204,10 +204,9 @@ internal fun EqSection(s: SpeakerState, speaker: SpeakerController, store: EqPre
             ?: HintText("Pick a sound profile, or tap New EQ to shape your own.")
     }
 
-    BandModels.forModel(s.model)?.let { shapes ->
-        TuneRoomRow(onClick = { tuning = true })
-        if (tuning) RoomCorrectionWizard(s, speaker, store, shapes, onDismiss = { tuning = false })
-    }
+    val bandModel = BandModels.forModel(s.model)
+    TuneRoomRow(approximate = !bandModel.measured, onClick = { tuning = true })
+    if (tuning) RoomCorrectionWizard(s, speaker, store, bandModel, onDismiss = { tuning = false })
     val calibrationCsv = File(LocalContext.current.getExternalFilesDir(null), "bandcal.csv")
     DebugTool("Calibrate bands (debug)", speaker) { sp, meter, progress -> BandCalibration.run(sp, meter, calibrationCsv, progress) }
     DebugTool("Probe AUX input (debug)", speaker, InputProbe::run)
@@ -397,7 +396,7 @@ private fun ProfileDetails(p: SoundProfile) {
 }
 
 @Composable
-private fun TuneRoomRow(onClick: () -> Unit) {
+private fun TuneRoomRow(approximate: Boolean, onClick: () -> Unit) {
     Row(
         Modifier
             .fillMaxWidth()
@@ -410,7 +409,20 @@ private fun TuneRoomRow(onClick: () -> Unit) {
         IconBadge(Icons.Default.Mic, size = 40.dp, iconSize = 20.dp)
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
-            Text("Tune to this room", style = MaterialTheme.typography.titleSmall)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Tune to this room", style = MaterialTheme.typography.titleSmall)
+                if (approximate) {
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        "Approx.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier
+                            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(4.dp))
+                            .padding(horizontal = 5.dp, vertical = 1.dp),
+                    )
+                }
+            }
             HintText("Measure with your phone and get an EQ that evens out the room.")
         }
         Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)

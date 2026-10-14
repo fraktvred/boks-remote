@@ -79,7 +79,13 @@ data class SplitBand(val lowHz: Double?, val highHz: Double?, val slope: Double)
     }
 }
 
-/** Per-model band shapes, measured with [BandCalibration]. Null until a model has been measured. */
+/** A model's band shapes; [measured] is false when they are borrowed from another model. */
+data class BandModel(val shapes: List<BandResponse>, val measured: Boolean)
+
+/**
+ * Per-model band shapes, measured with [BandCalibration]. Every model takes the same six-band
+ * setting, so one that hasn't been measured yet borrows the Mix's shapes as an approximation.
+ */
 object BandModels {
     /**
      * SOUNDBOKS Mix (fw 1.1.1), measured 2026-10-14: six flat-topped bands split at about 100 Hz,
@@ -95,9 +101,9 @@ object BandModels {
         SplitBand(8_261.0, null, 12.1),
     )
 
-    fun forModel(model: ProductModel?): List<BandResponse>? = when (model) {
-        ProductModel.SB_MIX -> MIX
-        else -> null
+    fun forModel(model: ProductModel?): BandModel = when (model) {
+        ProductModel.SB_MIX -> BandModel(MIX, measured = true)
+        else -> BandModel(MIX, measured = false)
     }
 }
 

@@ -30,6 +30,7 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import dev.boksremote.BuildConfig
 
 /** Icon on a tinted circle; the app's one visual anchor for devices, sections and empty states. */
 @Composable
@@ -97,3 +98,12 @@ internal fun <T> Choice(options: List<T>, selected: T?, label: (T) -> String, on
         }
     }
 }
+
+/** Stand-ins from a screenshot build ([BuildConfig.SCREENSHOT_NAMES]), as (part of a name, name shown). */
+private val screenshotNames = BuildConfig.SCREENSHOT_NAMES.split(';').mapNotNull { entry ->
+    entry.split('=', limit = 2).takeIf { it.size == 2 && it[0].isNotBlank() }?.let { (key, shown) -> key.trim() to shown.trim() }
+}
+
+/** A device's name as the app shows it: the advertised name, or its stand-in in a screenshot build. */
+internal fun shownName(name: String?): String? =
+    name?.let { n -> screenshotNames.firstOrNull { it.first in n }?.second ?: n }
