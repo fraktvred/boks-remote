@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- One-colour silhouette of ic_launcher_fg for themed icons: the drivers are cut out of the box. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <group android:scaleX="0.3" android:scaleY="0.3"
+        android:translateX="16.6" android:translateY="14.7">
+        <group android:rotation="-10" android:pivotX="100" android:pivotY="136">
+            <group android:translateX="8" android:translateY="4">
+                <path android:strokeColor="#FFFFFFFF" android:strokeLineCap="round" android:strokeWidth="9"
+                    android:pathData="M168,94A34,34 0,0 1,168 146" />
+                <path android:strokeColor="#FFFFFFFF" android:strokeLineCap="round" android:strokeWidth="8"
+                    android:pathData="M180.7,78.6A54,54 0,0 1,180.7 161.4" />
+                <path android:strokeColor="#FFFFFFFF" android:strokeLineCap="round" android:strokeWidth="7"
+                    android:pathData="M193.6,63.3A74,74 0,0 1,193.6 176.7" />
+            </group>
+        </group>
+        <group android:rotation="-10" android:pivotX="100" android:pivotY="136">
+            <path android:fillColor="#FFFFFFFF" android:fillType="evenOdd"
+                android:pathData="M64,64h64a16,16 0,0 1,16 16v116a16,16 0,0 1,-16 16h-64a16,16 0,0 1,-16 -16v-116a16,16 0,0 1,16 -16z
+                    M96,124m-36,0a36,36 0,1 1,72 0a36,36 0,1 1,-72 0
+                    M96,184m-10,0a10,10 0,1 1,20 0a10,10 0,1 1,-20 0" />
+            <path android:strokeColor="#FFFFFFFF" android:strokeWidth="5"
+                android:pathData="M96,124m-25,0a25,25 0,1 1,50 0a25,25 0,1 1,-50 0" />
+            <path android:fillColor="#FFFFFFFF"
+                android:pathData="M96,124m-11,0a11,11 0,1 1,22 0a11,11 0,1 1,-22 0" />
+        </group>
+    </group>
+</vector>
