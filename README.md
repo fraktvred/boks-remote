@@ -54,28 +54,45 @@ Every release is signed with the same key, so a newer APK installs over the old 
 
 ## Features
 
-| | Gen 3 / Gen 4 / Go | Mix / Rider (and newer) | Lightboks | Official app |
-|---|---|---|---|---|
-| **Room tuning by microphone** | approx. | Mix; others approx. | – | **–** |
-| **DMX bridge (Art-Net / sACN)** | – | – | ✓ | **–** |
-| **Cycle: rotate through chosen palettes on a timer** | – | – | ✓ | **–** |
-| **Scenes: brightness, light mode, colours and Cycle in one tap** | – | – | ✓ | **–** |
-| **Sleep fade to dark, then off** | – | – | ✓ | **–** |
-| **Palettes from a photo or a colour harmony** | – | – | ✓ | **–** |
-| Volume and mute, battery, active inputs | ✓ | ✓ | battery | ✓ |
-| Sound profiles (per-model names, e.g. Bass+ / Outdoor / Indoor) | ✓ | ✓ (RPC) | – | ✓ |
-| Custom 6-band EQ, saved presets | ✓ | ✓ (RPC) | – | ✓ |
-| Team-up solo / host / join, stereo channel | ✓ | ✓ | team-up | ✓ |
-| Brightness, light mode, colour palettes, held effects | – | – | ✓ | ✓ |
-| Rename, auto power-off | – | ✓ (RPC) | ✓ (RPC) | ✓ |
-| Owner pincode | firmware ≥ 3 | ✓ | ✓ | ✓ |
-| Power off | ✓ | ✓ | ✓ | ✓ |
-| Firmware updates, registration, anti-theft lock | – | – | – | ✓ |
+Speakers and the Lightboks each get a screen with the controls their hardware has. **Demo mode** (⋮ on the device list) shows both without the hardware.
 
-<sub>**Bold rows** (at the top) are only in Boks Remote; the last column compares with the official SOUNDBOKS app. **RPC:** on these models the feature goes through the protobuf command channel of newer firmware. **approx.:** this model's EQ bands haven't been [measured](#help-measure-your-speaker) yet, so room tuning uses the Mix's. **firmware ≥ 3:** older Gen 3 firmware has no command channel for the pincode, so it has to be entered in the official app.</sub>
+### SOUNDBOKS speakers
+
+| | Gen 3 / Gen 4 / Go | Mix / Rider (and newer) | Official app |
+|---|---|---|---|
+| **Room tuning by microphone** | approx. | Mix; others approx. | **–** |
+| Volume and mute, battery, active inputs | ✓ | ✓ | ✓ |
+| Sound profiles (per-model names, e.g. Bass+ / Outdoor / Indoor) | ✓ | ✓ (RPC) | ✓ |
+| Custom 6-band EQ, saved presets | ✓ | ✓ (RPC) | ✓ |
+| Team-up solo / host / join, stereo channel | ✓ | ✓ | ✓ |
+| Rename, auto power-off | – | ✓ (RPC) | ✓ |
+| Owner pincode | firmware ≥ 3 | ✓ | ✓ |
+| Power off | ✓ | ✓ | ✓ |
+| Firmware updates, registration, anti-theft lock | – | – | ✓ |
+
+<sub>**Bold rows** are only in Boks Remote; the last column compares with the official SOUNDBOKS app. **RPC:** on these models the feature goes through the protobuf command channel of newer firmware. **approx.:** this model's EQ bands haven't been [measured](#help-measure-your-speaker) yet, so room tuning uses the Mix's. **firmware ≥ 3:** older Gen 3 firmware has no command channel for the pincode, so it has to be entered in the official app.</sub>
 
 - **Custom EQ:** drag six bands (±10 dB), hear it live, and save curves on the phone.
 - **Room tuning:** measure a few listening spots with the phone or a USB microphone and get a suggested EQ.
+
+### Lightboks
+
+| | Boks Remote | Official app |
+|---|---|---|
+| **DMX bridge (Art-Net / sACN)** | ✓ | **–** |
+| **Cycle: rotate through chosen palettes on a timer** | ✓ | **–** |
+| **Scenes: brightness, light mode, colours and Cycle in one tap** | ✓ | **–** |
+| **Sleep fade to dark, then off** | ✓ | **–** |
+| **Palettes from a photo or a colour harmony** | ✓ | **–** |
+| Brightness, light mode, colour palettes, held effects | ✓ | ✓ |
+| Battery, team-up | ✓ | ✓ |
+| Rename | ✓ | ✓ |
+| Owner pincode | ✓ | ✓ |
+| Power off | ✓ | ✓ |
+| Firmware updates, registration, anti-theft lock | – | ✓ |
+
+<sub>**Bold rows** are only in Boks Remote. The [DMX bridge](#dmx-bridge-lightboks) has its own section below.</sub>
+
 - **Cycle:** rotate the Lightboks through chosen palettes every 30 s to 30 min, in order or shuffled, with the screen off too. Pause, Skip, or tap a palette to jump to it.
 - **Palette editor:** sliders, colour codes and recent colours, with a live preview on the light.
 - **Colour harmonies:** build all four colours from one: Analogous, Complement, Split, Triadic, Square or Mono.
