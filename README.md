@@ -23,22 +23,16 @@ An independent Android controller for SOUNDBOKS speakers and the Lightboks over 
 | Volume and mute, battery, active inputs | ✓ | ✓ | battery |
 | Sound profiles (per-model names, e.g. Bass+ / Outdoor / Indoor) | ✓ | ✓ (RPC) | – |
 | Custom 6-band EQ, saved presets | ✓ | ✓ (RPC) | – |
-| Room tuning with the phone's microphone | – | Mix | – |
+| Room tuning by microphone | – | Mix | – |
 | Team-up solo / host / join, stereo channel | ✓ | ✓ | team-up |
 | Brightness, light mode | – | – | ✓ |
 | Rename, auto power-off | – | ✓ (RPC) | ✓ (RPC) |
 | Owner pincode | firmware ≥ 3 | ✓ | ✓ |
 | Power off | ✓ | ✓ | ✓ |
 
-**Volume and mute.** The speaker has no mute of its own, so muting sets the volume to 0 and unmuting restores the previous level.
-
-**Sound profiles.** Each model's built-in profiles appear under the names the official app uses (Mix and Rider: Bass+ / Outdoor / Indoor, Gen 3 and Go: Bass+ / Power / Indoor, Gen 4: Stage / Dancefloor / Lounge). Each shows a short description, its bass/mid/treble character and the battery life to expect at full volume.
-
-**Custom EQ.** Pick **Custom**, then drag six points from bass to treble (±10 dB per band). The speaker plays the curve live while you drag, and each band's gain is shown under its point. **New EQ** starts from a flat curve, and **Save to Your EQs** keeps it on the phone. Tap a saved EQ to play it. After changing one, update it in place, save it as a new EQ, or revert to the saved version. Rename or delete the playing EQ from the ⋮ menu, or any saved EQ by long-pressing it.
-
-**Room tuning (Mix).** A guided measurement that suggests an EQ for where you listen. Say whether the speaker is indoors or outdoors and pick a sound (Balanced, Thick bass or Clear voices). The phone then plays test tones over Bluetooth while you hold it close to the speaker, and again at one to three listening spots. The result plots the room's response with and without the suggested EQ, lets you switch the sound goal without measuring again, lets you hear the speaker with and without the EQ, and saves the EQ to Your EQs. A USB measurement microphone can be used instead of the phone's own, for more accurate bass and treble. The Mix's six bands were measured on hardware (firmware 1.1.1), so other models don't offer room tuning yet.
-
-**Lightboks.** Four-colour palettes (a preset browser, a colour editor and your own saved palettes), Uplight, held effects (strobe, blackout, chase, sparkle) and the DMX bridge below.
+- **Custom EQ:** drag six bands (±10 dB), hear the change live, and save curves on the phone.
+- **Room tuning:** measure at a few listening spots with the phone or a USB microphone and get a suggested EQ. Only the Mix so far, because each model's EQ bands have to be measured once first.
+- **Lightboks:** colour palettes, held effects (strobe, blackout, chase, sparkle) and a DMX bridge.
 
 Not supported: firmware updates, registration and anti-theft lock/unlock (these need SOUNDBOKS's servers). Saved EQs stay on the phone rather than syncing to a SOUNDBOKS account.
 
@@ -91,7 +85,7 @@ Create the keystore once with `keytool -genkeypair -v -keystore release.jks -key
 
 ## Privacy
 
-Boks Remote has no account, analytics or cloud connection. It talks to your speaker over Bluetooth, and listens on the local network only while the DMX bridge runs. The microphone is used only during room tuning; the test tones are analysed on the phone and no recording is kept. Owner pincodes, saved palettes and saved EQs are stored on the phone, are excluded from Android backups, and never leave the device.
+Boks Remote has no account, analytics or cloud connection. It talks to your speaker over Bluetooth, and listens on the local network only while the DMX bridge runs. The microphone is used only during room tuning, and no recording is kept. Owner pincodes, saved palettes and saved EQs are stored on the phone, are excluded from Android backups, and never leave the device.
 
 ## Status
 
