@@ -12,6 +12,7 @@ import dev.boksremote.dmx.DmxConfig
 import dev.boksremote.dmx.DmxStatus
 import dev.boksremote.speaker.CycleConfig
 import dev.boksremote.speaker.CycleStatus
+import dev.boksremote.speaker.SleepStatus
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -19,7 +20,7 @@ import kotlinx.coroutines.launch
 
 /**
  * Keeps the process in the foreground while something drives the light from the background (the DMX
- * bridge or Cycle), so Android doesn't stop the network receiver, the timer or the Bluetooth link when
+ * bridge, Cycle or Sleep fade), so Android doesn't stop the network receiver, the timer or the Bluetooth link when
  * the screen is off. [BoksApp] starts and stops it; the notification only mirrors their state, so a
  * show can be checked from the lock screen.
  */
@@ -33,6 +34,7 @@ class LightSessionService : Service() {
         if (intent?.action == ACTION_STOP) {
             app.stopBridge()
             app.cycle.stop()
+            app.sleep.stop()
             return START_NOT_STICKY
         }
         val nm = getSystemService(NotificationManager::class.java)
@@ -42,7 +44,7 @@ class LightSessionService : Service() {
         updates?.cancel()
         updates = app.scope.launch {
             // Only distinct summaries are posted, so the packet rate ticking doesn't re-notify every second.
-            combine(app.bridge.status, app.dmxConfig, app.cycle.status, app.cycle.config, ::summary)
+            combine(app.bridge.status, app.dmxConfig, app.cycle.status, app.cycle.config, app.sleep.status, ::summary)
                 .distinctUntilChanged()
                 // A post after stop would leave a stale, non-foreground notification behind.
                 .collect { if (it != null) nm.notify(NOTIFICATION_ID, build(it)) }
@@ -77,11 +79,15 @@ class LightSessionService : Service() {
         private const val NOTIFICATION_ID = 1
         private const val ACTION_STOP = "dev.boksremote.STOP_LIGHT_SESSION"
 
-        /** The bridge takes the notification while it runs, since Cycle is paused meanwhile; null when neither runs. */
-        fun summary(bridge: DmxStatus, dmx: DmxConfig, cycle: CycleStatus, cycleConfig: CycleConfig): Summary? = when {
-            bridge.running -> Summary("DMX bridge running", bridgeSummary(bridge, dmx))
-            cycle.running -> Summary("Cycling palettes", "${cycle.current} · changes every ${CycleConfig.intervalLabel(cycleConfig.intervalSeconds)}")
-            else -> null
+        /** The bridge takes the notification while it runs, since Cycle is paused meanwhile; null when none runs. */
+        fun summary(bridge: DmxStatus, dmx: DmxConfig, cycle: CycleStatus, cycleConfig: CycleConfig, sleep: SleepStatus): Summary? {
+            val fading = if (sleep.running) " · fading out over ${sleep.minutes} min" else ""
+            return when {
+                bridge.running -> Summary("DMX bridge running", bridgeSummary(bridge, dmx))
+                cycle.running -> Summary("Cycling palettes", "${cycle.current} · changes every ${CycleConfig.intervalLabel(cycleConfig.intervalSeconds)}$fading")
+                sleep.running -> Summary("Sleep fade", "Fading out over ${sleep.minutes} min, then switching the light off")
+                else -> null
+            }
         }
 
         fun bridgeSummary(s: DmxStatus, c: DmxConfig): String = when {

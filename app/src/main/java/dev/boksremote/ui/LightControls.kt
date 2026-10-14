@@ -214,42 +214,51 @@ private class PreviewSession(
 /** Press-and-hold pads, like the official app's FX panel: the effect runs only while a finger is down. */
 @Composable
 fun FxPad(speaker: SpeakerController) {
-    var held by remember { mutableStateOf<LightFx?>(null) }
-    val haptics = LocalHapticFeedback.current
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         LightFx.entries.chunked(2).forEach { row ->
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
                 row.forEach { fx ->
-                    val active = held == fx
-                    Box(
-                        Modifier
-                            .weight(1f)
-                            .aspectRatio(2f)
-                            .scale(if (active) 0.96f else 1f)
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondaryContainer)
-                            .semantics { contentDescription = "${fx.label}, press and hold" }
-                            .pointerInput(fx) {
-                                detectTapGestures(onPress = {
-                                    held = fx
-                                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                                    speaker.holdFx(fx)
-                                    tryAwaitRelease()
-                                    held = null
-                                    speaker.holdFx(null)
-                                })
-                            },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(
-                            fx.label,
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = if (active) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSecondaryContainer,
-                        )
-                    }
+                    HoldPad(fx.label, "${fx.label}, press and hold", Modifier.weight(1f).aspectRatio(2f)) { held -> speaker.holdFx(fx.takeIf { held }) }
                 }
             }
+        }
+        HoldPad(
+            "Drop",
+            "Drop: hold for the build-up, let go for the drop",
+            Modifier.fillMaxWidth().height(64.dp),
+            hint = "Hold for the build-up, let go for the drop",
+            onHold = speaker::holdDrop,
+        )
+    }
+}
+
+/** One pad: [onHold] gets true when a finger goes down and false when it lifts. */
+@Composable
+private fun HoldPad(label: String, description: String, modifier: Modifier, hint: String? = null, onHold: (Boolean) -> Unit) {
+    var active by remember { mutableStateOf(false) }
+    val haptics = LocalHapticFeedback.current
+    Box(
+        modifier
+            .scale(if (active) 0.96f else 1f)
+            .clip(RoundedCornerShape(16.dp))
+            .background(if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondaryContainer)
+            .semantics { contentDescription = description }
+            .pointerInput(Unit) {
+                detectTapGestures(onPress = {
+                    active = true
+                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                    onHold(true)
+                    tryAwaitRelease()
+                    active = false
+                    onHold(false)
+                })
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        val color = if (active) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSecondaryContainer
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(label, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = color)
+            if (hint != null) Text(hint, style = MaterialTheme.typography.labelSmall, color = color.copy(alpha = 0.8f))
         }
     }
 }

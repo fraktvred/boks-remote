@@ -31,6 +31,7 @@ import androidx.compose.material.icons.filled.Battery2Bar
 import androidx.compose.material.icons.filled.Battery4Bar
 import androidx.compose.material.icons.filled.Battery6Bar
 import androidx.compose.material.icons.filled.BatteryFull
+import androidx.compose.material.icons.filled.Bedtime
 import androidx.compose.material.icons.filled.BluetoothDisabled
 import androidx.compose.material.icons.filled.BrightnessMedium
 import androidx.compose.material.icons.filled.Edit
@@ -222,6 +223,7 @@ fun SpeakerScreen(speaker: SpeakerController, app: BoksApp, onBack: () -> Unit) 
 private fun Controls(s: SpeakerState, speaker: SpeakerController, app: BoksApp) {
     val bridge by app.bridge.status.collectAsState()
     val cycle by app.cycle.status.collectAsState()
+    val sleep by app.sleep.status.collectAsState()
     DeviceHeader(s)
     if (s.locked) {
         Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
@@ -256,7 +258,8 @@ private fun Controls(s: SpeakerState, speaker: SpeakerController, app: BoksApp) 
         }
     }
     s.brightness?.let { brightness ->
-        LevelCard("Brightness", Icons.Default.BrightnessMedium, brightness, speaker::setBrightness)
+        // Moving the slider takes over from a running fade.
+        LevelCard("Brightness", Icons.Default.BrightnessMedium, brightness, { app.sleep.stop(); speaker.setBrightness(it) })
     }
     s.energyLevel?.let { level ->
         SectionCard("Light mode", Icons.Default.Lightbulb) { Choice(EnergyLevel.entries, level, { it.label }, speaker::setEnergyLevel) }
@@ -264,6 +267,7 @@ private fun Controls(s: SpeakerState, speaker: SpeakerController, app: BoksApp) 
     if (s.family == Family.LIGHT && s.rpcAvailable) {
         SectionCard("Colours", Icons.Default.Palette) { PaletteSection(s, speaker, app.palettes, app.cycle) }
         SectionCard("Cycle", Icons.Default.Autorenew, trailing = { if (cycle.running) LiveBadge(receiving = true) }) { CycleSection(app, speaker) }
+        SectionCard("Sleep fade", Icons.Default.Bedtime, trailing = { if (sleep.running) LiveBadge(receiving = true) }) { SleepSection(app, speaker, bridge.running) }
         SectionCard("Effects", Icons.Default.Whatshot, trailing = { HintText("Hold to play") }) { FxPad(speaker) }
         SectionCard("DMX bridge", Icons.Default.SettingsInputAntenna, trailing = { if (bridge.running) LiveBadge(receiving = bridge.packetsPerSecond > 0) }) {
             DmxSection(app)

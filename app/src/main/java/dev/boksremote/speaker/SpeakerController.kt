@@ -17,6 +17,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -411,6 +412,38 @@ class SpeakerController(
         fxWrites.trySend(fx?.id ?: LightContentCodec.NO_ID)
     }
 
+    private var dropJob: Job? = null
+    /** The brightness to return to after a drop; kept when a new drop cuts the last one short. */
+    private var dropReturn: Int? = null
+
+    /**
+     * Drop pad: blackout while held, the silence before the drop; on release a short strobe at full
+     * brightness, then the effect stops and the brightness goes back to what it was.
+     */
+    fun holdDrop(held: Boolean) {
+        val previous = dropJob
+        if (held) {
+            // A new press cuts the last drop short.
+            previous?.cancel()
+            dropJob = scope.launch { attempt("drop") { applyFx(LightFx.BLACKOUT.id) } }
+            return
+        }
+        dropJob = scope.launch {
+            // In order after the blackout, even for a quick tap.
+            previous?.join()
+            val before = dropReturn ?: _state.value.brightness
+            dropReturn = before
+            attempt("drop") {
+                applyFx(LightFx.STROBE.id)
+                if (before != null) applyBrightness(255)
+                delay(DROP_MS)
+                applyFx(LightContentCodec.NO_ID)
+                if (before != null) applyBrightness(before)
+            }
+            dropReturn = null
+        }
+    }
+
     private fun checkLightStatus(response: dev.boksremote.proto.ProtoMessage) {
         val status = response.int(1)
         if (status != 0) throw IllegalStateException("light rejected the request (status $status)")
@@ -552,6 +585,7 @@ class SpeakerController(
         private const val TAG = "SpeakerController"
         /** About 30 %, a safe level to unmute to when the previous one is unknown. */
         private const val UNMUTE_DEFAULT = 77
+        private const val DROP_MS = 2_000L
 
         // Program ids built into the Lightboks firmware, as used by the official app.
         private val UPLIGHT_PROGRAM: UUID = UUID.fromString("303c4ee1-e178-4f2f-bc18-6b3f4f682825")
