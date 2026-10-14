@@ -10,6 +10,9 @@ import android.bluetooth.BluetoothProfile
 import android.bluetooth.BluetoothStatusCodes
 import android.content.Context
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -17,6 +20,7 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import java.util.UUID
 
@@ -163,11 +167,13 @@ class GattConnection(private val context: Context, private val device: Bluetooth
             pending = null
             throw GattException("operation rejected by stack")
         }
+        // Android takes one operation at a time and refuses the next until this one's callback, so once
+        // started it is waited out even if the caller is cancelled meanwhile; the cancellation lands after.
         try {
-            withTimeout(timeoutMs) { d.await() }
+            withContext(NonCancellable) { withTimeout(timeoutMs) { d.await() } }
         } finally {
             pending = null
-        }
+        }.also { currentCoroutineContext().ensureActive() }
     }
 
     companion object {
