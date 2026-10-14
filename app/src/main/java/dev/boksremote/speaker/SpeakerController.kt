@@ -335,6 +335,20 @@ class SpeakerController(
         volumeWrites.trySend(v)
     }
 
+    /** Where unmuting returns to. The speaker has no mute of its own, so muted means volume 0. */
+    private var unmuteVolume: Int? = null
+
+    fun toggleMute() {
+        val v = _state.value.volume ?: return
+        if (v > 0) {
+            unmuteVolume = v
+            setVolume(0)
+        } else {
+            // Muted from the speaker's own buttons or by dragging to 0, there is nothing to return to.
+            setVolume(unmuteVolume ?: UNMUTE_DEFAULT)
+        }
+    }
+
     private suspend fun writeVolume(v: Int) {
         val c = if (family == Family.LEGACY) Uuids.LEGACY_VOLUME else Uuids.VOLUME
         gatt.write(c, byteArrayOf(v.toByte()))
@@ -536,6 +550,8 @@ class SpeakerController(
 
     companion object {
         private const val TAG = "SpeakerController"
+        /** About 30 %, a safe level to unmute to when the previous one is unknown. */
+        private const val UNMUTE_DEFAULT = 77
 
         // Program ids built into the Lightboks firmware, as used by the official app.
         private val UPLIGHT_PROGRAM: UUID = UUID.fromString("303c4ee1-e178-4f2f-bc18-6b3f4f682825")

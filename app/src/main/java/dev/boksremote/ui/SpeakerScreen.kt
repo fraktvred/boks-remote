@@ -22,6 +22,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.VolumeDown
+import androidx.compose.material.icons.automirrored.filled.VolumeMute
+import androidx.compose.material.icons.automirrored.filled.VolumeOff
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Battery0Bar
 import androidx.compose.material.icons.filled.Battery2Bar
@@ -44,6 +46,7 @@ import androidx.compose.material.icons.filled.Whatshot
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.IconToggleButton
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -229,7 +232,23 @@ private fun Controls(s: SpeakerState, speaker: SpeakerController, app: BoksApp) 
         }
     }
     s.volume?.let { volume ->
-        LevelCard("Volume", Icons.AutoMirrored.Filled.VolumeUp, volume, speaker::setVolume, stepIcons = Icons.AutoMirrored.Filled.VolumeDown to Icons.AutoMirrored.Filled.VolumeUp)
+        LevelCard(
+            "Volume",
+            Icons.AutoMirrored.Filled.VolumeUp,
+            volume,
+            speaker::setVolume,
+            stepIcons = Icons.AutoMirrored.Filled.VolumeDown to Icons.AutoMirrored.Filled.VolumeUp,
+            zeroLabel = "Muted",
+        ) {
+            val muted = volume == 0
+            IconToggleButton(checked = muted, onCheckedChange = { speaker.toggleMute() }) {
+                Icon(
+                    if (muted) Icons.AutoMirrored.Filled.VolumeOff else Icons.AutoMirrored.Filled.VolumeMute,
+                    contentDescription = if (muted) "Unmute" else "Mute",
+                    tint = if (muted) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
     }
     s.brightness?.let { brightness ->
         LevelCard("Brightness", Icons.Default.BrightnessMedium, brightness, speaker::setBrightness)
@@ -335,7 +354,8 @@ private fun BridgeReconnectNote(app: BoksApp) {
 
 /**
  * 0..255 wire value shown as a percentage in the card header. Writes stream while dragging; the
- * controller drops stale values. [stepIcons] adds -/+ buttons for small, precise changes.
+ * controller drops stale values. [stepIcons] adds -/+ buttons for small, precise changes;
+ * [zeroLabel] replaces "0%" and [action] sits next to the percentage.
  */
 @Composable
 private fun LevelCard(
@@ -344,6 +364,8 @@ private fun LevelCard(
     value: Int,
     onChange: (Int) -> Unit,
     stepIcons: Pair<ImageVector, ImageVector>? = null,
+    zeroLabel: String? = null,
+    action: (@Composable () -> Unit)? = null,
 ) {
     var dragging by remember { mutableStateOf(false) }
     var local by remember { mutableFloatStateOf(value / 255f) }
@@ -353,7 +375,15 @@ private fun LevelCard(
     SectionCard(
         title,
         icon,
-        trailing = { Text("${(local * 100).roundToInt()}%", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary) },
+        trailing = {
+            val percent = (local * 100).roundToInt()
+            Text(
+                if (percent == 0 && zeroLabel != null) zeroLabel else "$percent%",
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            action?.invoke()
+        },
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             if (stepIcons != null) {
