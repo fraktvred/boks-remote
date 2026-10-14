@@ -73,6 +73,8 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -80,6 +82,7 @@ import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import dev.boksremote.BoksApp
@@ -251,7 +254,7 @@ private fun CycleEditorSheet(
 
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), modifier = Modifier.sheetTopMargin()) {
         Box {
-            Column(Modifier.verticalScroll(rememberScrollState()).navigationBarsPadding().padding(bottom = 16.dp)) {
+            Column(Modifier.nestedScroll(KeepListFling).verticalScroll(rememberScrollState()).navigationBarsPadding().padding(bottom = 16.dp)) {
                 Text("Cycle", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(horizontal = 24.dp))
                 Spacer(Modifier.height(16.dp))
                 Column(Modifier.padding(horizontal = 24.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -309,6 +312,17 @@ private fun CycleEditorSheet(
             SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).navigationBarsPadding())
         }
     }
+}
+
+/**
+ * Keeps the speed a fling of the list has left at its end from the sheet. Given any, the sheet settles
+ * with an animation even when already fully open, and while that runs it takes the next touch as a drag
+ * of its own, so a tap on a palette was lost. A flick down of the sheet itself, where the list didn't
+ * scroll, still reaches it and closes it.
+ */
+private val KeepListFling = object : NestedScrollConnection {
+    override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity =
+        if (consumed.y != 0f || available.y < 0f) available else Velocity.Zero
 }
 
 /** A list heading, with an optional text button at its end such as "Add all". */
