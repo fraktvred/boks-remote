@@ -1,5 +1,15 @@
 package dev.boksremote.ui
 
+import android.Manifest
+import android.content.pm.ApplicationInfo
+import android.content.pm.PackageManager
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.ContextCompat
+import dev.boksremote.audio.BandCalibration
+import dev.boksremote.audio.BandModels
+import dev.boksremote.audio.RoomMeter
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -114,6 +124,7 @@ internal fun EqSection(s: SpeakerState, speaker: SpeakerController, store: EqPre
     var naming by remember { mutableStateOf(false) }
     var renaming by remember { mutableStateOf<EqPreset?>(null) }
     var deleting by remember { mutableStateOf<EqPreset?>(null) }
+    var tuning by remember { mutableStateOf(false) }
 
     // Wraps rather than scrolls, so "+" and every saved curve stay in view.
     FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -170,6 +181,15 @@ internal fun EqSection(s: SpeakerState, speaker: SpeakerController, store: EqPre
             ?: HintText("Pick a sound profile, or tap Custom to shape your own.")
     }
 
+    BandModels.forModel(s.model)?.let { shapes ->
+        TextButton(onClick = { tuning = true }) {
+            Icon(Icons.Default.Mic, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(8.dp))
+            Text("Tune to this room")
+        }
+        if (tuning) RoomCorrectionSheet(s, speaker, store, shapes, onDismiss = { tuning = false })
+    }
+    DebugTool("Calibrate bands (debug)", speaker, BandCalibration::run)
 
     if (naming) {
         PaletteNameDialog("Name your custom EQ", initial = "", confirm = "Save", placeholder = "My EQ", onDismiss = { naming = false }) {
@@ -266,12 +286,13 @@ private fun ProfileDetails(p: SoundProfile) {
 /**
  * The six-band curve, bass on the left. Touch anywhere to grab the nearest band and drag it up or
  * down; every whole-dB change is sent straight to the speaker so it can be heard while editing.
+ * Without [onChange] it only shows the curve.
  */
 @Composable
-private fun EqGraph(bands: List<Int>, onChange: (List<Int>) -> Unit) {
+internal fun EqGraph(bands: List<Int>, onChange: ((List<Int>) -> Unit)?) {
     val haptics = LocalHapticFeedback.current
     val current by rememberUpdatedState(bands)
-    val change by rememberUpdatedState(onChange)
+    val change by rememberUpdatedState(onChange ?: {})
     var active by remember { mutableStateOf<Int?>(null) }
     val colors = MaterialTheme.colorScheme
     val axisWidth = 44.dp
@@ -289,7 +310,7 @@ private fun EqGraph(bands: List<Int>, onChange: (List<Int>) -> Unit) {
                     .fillMaxWidth()
                     .height(240.dp)
                     .semantics { contentDescription = "EQ curve: " + current.mapIndexed { i, db -> "band ${i + 1} ${dbLabel(db)}" }.joinToString(", ") }
-                    .pointerInput(Unit) {
+                    .then(if (onChange == null) Modifier else Modifier.pointerInput(Unit) {
                         val pad = 12.dp.toPx()
                         fun xOf(i: Int) = pad + i * (size.width - 2 * pad) / (EqCurve.BANDS - 1)
                         fun dbAt(y: Float) = (EqCurve.MAX_DB - (y - pad) / (size.height - 2 * pad) * span).roundToInt().coerceIn(EqCurve.MIN_DB, EqCurve.MAX_DB)
@@ -316,7 +337,7 @@ private fun EqGraph(bands: List<Int>, onChange: (List<Int>) -> Unit) {
                             }
                             active = null
                         }
-                    },
+                    }),
             ) {
                 val pad = 12.dp.toPx()
                 val w = size.width - 2 * pad
@@ -359,4 +380,39 @@ private fun EqGraph(bands: List<Int>, onChange: (List<Int>) -> Unit) {
             Text("Treble", style = MaterialTheme.typography.labelMedium, color = colors.onSurfaceVariant, modifier = Modifier.weight(1f), textAlign = TextAlign.End)
         }
     }
+}
+
+/** Debug builds only: runs a measurement tool against the connected speaker, showing its progress. */
+@Composable
+private fun DebugTool(
+    label: String,
+    speaker: SpeakerController,
+    tool: suspend (SpeakerController, RoomMeter, (String) -> Unit) -> Unit,
+) {
+    val context = LocalContext.current
+    if (context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE == 0) return
+    val scope = rememberCoroutineScope()
+    var progress by remember { mutableStateOf<String?>(null) }
+    var running by remember { mutableStateOf(false) }
+    TextButton(
+        enabled = !running,
+        onClick = {
+            if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+                progress = "Failed: grant microphone permission"
+                return@TextButton
+            }
+            running = true
+            scope.launch {
+                progress = try {
+                    tool(speaker, RoomMeter(context)) { progress = it }
+                    "Done"
+                } catch (e: Exception) {
+                    if (e is kotlinx.coroutines.CancellationException) throw e
+                    "Failed: ${e.message}"
+                } finally {
+                    running = false
+                }
+            }
+        },
+    ) { Text(progress?.let { "${label.removeSuffix(" (debug)")}: $it" } ?: label) }
 }
