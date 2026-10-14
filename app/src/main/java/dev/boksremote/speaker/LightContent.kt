@@ -5,14 +5,53 @@ import dev.boksremote.proto.ProtoWriter
 import dev.boksremote.proto.proto
 import java.nio.ByteBuffer
 import java.util.UUID
+import kotlin.math.abs
 import kotlin.math.roundToInt
 
 /** One palette colour in HSV: hue 0..360, saturation and value 0..1. */
 data class HsvColor(val hue: Float, val saturation: Float, val value: Float) {
-    /** ARGB int for drawing. */
-    fun toArgb(): Int = android.graphics.Color.HSVToColor(floatArrayOf(hue, saturation, value))
+    /** ARGB int for drawing. Pure Kotlin, like [fromRgb], so colour maths stays testable off-device. */
+    fun toArgb(): Int {
+        val h = ((hue % 360f) + 360f) % 360f / 60f
+        val s = saturation.coerceIn(0f, 1f); val v = value.coerceIn(0f, 1f)
+        val c = v * s
+        val x = c * (1 - abs(h % 2f - 1))
+        val (r, g, b) = when (h.toInt()) {
+            0 -> Triple(c, x, 0f)
+            1 -> Triple(x, c, 0f)
+            2 -> Triple(0f, c, x)
+            3 -> Triple(0f, x, c)
+            4 -> Triple(x, 0f, c)
+            else -> Triple(c, 0f, x)
+        }
+        val m = v - c
+        fun byte(f: Float) = ((f + m) * 255).roundToInt().coerceIn(0, 255)
+        return (0xFF shl 24) or (byte(r) shl 16) or (byte(g) shl 8) or byte(b)
+    }
+
+    /**
+     * The colour [t] (0..1) of the way to [to], along the shorter way round the hue circle. A grey has
+     * no hue of its own, so it takes the other colour's and only its saturation moves.
+     */
+    fun blend(to: HsvColor, t: Float): HsvColor {
+        val f = t.coerceIn(0f, 1f)
+        if (f == 1f) return to
+        val from = if (saturation < GREY) copy(hue = to.hue) else this
+        val target = if (to.saturation < GREY) to.copy(hue = from.hue) else to
+        val turn = ((target.hue - from.hue) % 360f + 540f) % 360f - 180f
+        return HsvColor(
+            ((from.hue + turn * f) % 360f + 360f) % 360f,
+            from.saturation + (target.saturation - from.saturation) * f,
+            from.value + (target.value - from.value) * f,
+        )
+    }
+
+    /** "#RRGGBB". */
+    fun hex(): String = "#%06X".format(toArgb() and 0xFFFFFF)
 
     companion object {
+        private const val GREY = 0.05f
+
         /** Pure-Kotlin RGB→HSV so palette parsing stays testable off-device. */
         fun fromRgb(r: Int, g: Int, b: Int): HsvColor {
             val rf = r / 255f; val gf = g / 255f; val bf = b / 255f
@@ -26,11 +65,15 @@ data class HsvColor(val hue: Float, val saturation: Float, val value: Float) {
             return HsvColor(hue, if (max == 0f) 0f else d / max, max)
         }
 
-        fun fromArgb(argb: Int): HsvColor {
-            val hsv = FloatArray(3)
-            android.graphics.Color.colorToHSV(argb, hsv)
-            return HsvColor(hsv[0], hsv[1], hsv[2])
+        /** "#RRGGBB" or "RRGGBB"; null if it isn't one. */
+        fun fromHex(text: String): HsvColor? {
+            val hex = text.trim().removePrefix("#")
+            if (hex.length != 6) return null
+            val rgb = hex.toIntOrNull(16) ?: return null
+            return fromRgb((rgb shr 16) and 0xFF, (rgb shr 8) and 0xFF, rgb and 0xFF)
         }
+
+        fun fromArgb(argb: Int): HsvColor = fromRgb((argb shr 16) and 0xFF, (argb shr 8) and 0xFF, argb and 0xFF)
     }
 }
 
@@ -40,6 +83,9 @@ data class HsvColor(val hue: Float, val saturation: Float, val value: Float) {
  */
 data class LightPalette(val name: String, val colors: List<HsvColor>) {
     init { require(colors.size == SIZE) { "a palette has $SIZE colours" } }
+
+    /** Colour by colour, [t] of the way to [to]; it carries [to]'s name, being on its way there. */
+    fun blend(to: LightPalette, t: Float) = LightPalette(to.name, colors.zip(to.colors) { a, b -> a.blend(b, t) })
 
     companion object {
         const val SIZE = 4
@@ -57,6 +103,19 @@ data class LightPalette(val name: String, val colors: List<HsvColor>) {
             LightPalette("Aurora", listOf(hsv(150, 90, 95), hsv(185, 85, 95), hsv(285, 70, 90), hsv(120, 60, 100))),
             LightPalette("Candy", listOf(hsv(330, 60, 100), hsv(190, 55, 100), hsv(280, 45, 100), hsv(55, 55, 100))),
             LightPalette("Ultraviolet", listOf(hsv(265, 100, 100), hsv(290, 95, 90), hsv(240, 100, 80), hsv(320, 80, 100))),
+            LightPalette("Synthwave", listOf(hsv(320, 100, 100), hsv(275, 90, 95), hsv(190, 100, 100), hsv(28, 100, 100))),
+            LightPalette("Vaporwave", listOf(hsv(310, 45, 100), hsv(178, 50, 100), hsv(265, 40, 100), hsv(55, 45, 100))),
+            LightPalette("Cyberpunk", listOf(hsv(58, 100, 100), hsv(185, 100, 100), hsv(315, 100, 100), hsv(0, 100, 100))),
+            LightPalette("Acid", listOf(hsv(78, 100, 100), hsv(300, 100, 100), hsv(55, 100, 100), hsv(0, 0, 100))),
+            LightPalette("Tropicana", listOf(hsv(172, 95, 95), hsv(338, 70, 100), hsv(35, 95, 100), hsv(90, 90, 100))),
+            LightPalette("Golden Hour", listOf(hsv(32, 95, 100), hsv(45, 90, 100), hsv(18, 60, 100), hsv(38, 25, 100))),
+            LightPalette("Blood Moon", listOf(hsv(355, 100, 90), hsv(18, 100, 85), hsv(285, 90, 60), hsv(35, 100, 100))),
+            LightPalette("Abyss", listOf(hsv(228, 100, 80), hsv(195, 100, 55), hsv(255, 95, 70), hsv(178, 90, 100))),
+            LightPalette("Galaxy", listOf(hsv(258, 90, 85), hsv(305, 85, 90), hsv(220, 95, 95), hsv(0, 0, 100))),
+            LightPalette("Warehouse", listOf(hsv(0, 100, 100), hsv(350, 100, 60), hsv(225, 70, 80), hsv(0, 0, 100))),
+            LightPalette("Matrix", listOf(hsv(120, 100, 100), hsv(135, 100, 55), hsv(95, 90, 90), hsv(120, 30, 100))),
+            LightPalette("Sakura", listOf(hsv(340, 40, 100), hsv(350, 25, 100), hsv(330, 10, 100), hsv(95, 70, 85))),
+            LightPalette("Prism", listOf(hsv(0, 100, 100), hsv(120, 100, 100), hsv(240, 100, 100), hsv(60, 100, 100))),
         )
     }
 }

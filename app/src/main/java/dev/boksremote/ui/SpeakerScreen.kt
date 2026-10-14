@@ -1,6 +1,8 @@
 package dev.boksremote.ui
 
+import android.os.SystemClock
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
@@ -25,11 +27,13 @@ import androidx.compose.material.icons.automirrored.filled.VolumeDown
 import androidx.compose.material.icons.automirrored.filled.VolumeMute
 import androidx.compose.material.icons.automirrored.filled.VolumeOff
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
+import androidx.compose.material.icons.filled.Autorenew
 import androidx.compose.material.icons.filled.Battery0Bar
 import androidx.compose.material.icons.filled.Battery2Bar
 import androidx.compose.material.icons.filled.Battery4Bar
 import androidx.compose.material.icons.filled.Battery6Bar
 import androidx.compose.material.icons.filled.BatteryFull
+import androidx.compose.material.icons.filled.Bedtime
 import androidx.compose.material.icons.filled.BluetoothDisabled
 import androidx.compose.material.icons.filled.BrightnessMedium
 import androidx.compose.material.icons.filled.Edit
@@ -37,7 +41,6 @@ import androidx.compose.material.icons.filled.Equalizer
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Lightbulb
 import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.SettingsInputAntenna
 import androidx.compose.material.icons.filled.Timer
@@ -52,6 +55,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -70,7 +74,9 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -90,6 +96,7 @@ import dev.boksremote.speaker.SpeakerState
 import dev.boksremote.speaker.StereoRole
 import dev.boksremote.speaker.TeamUpMode
 import kotlin.math.roundToInt
+import kotlinx.coroutines.delay
 
 /** About 5 % of the 0..255 wire range per tap of the volume buttons. */
 private const val LEVEL_STEP = 13
@@ -220,7 +227,9 @@ fun SpeakerScreen(speaker: SpeakerController, app: BoksApp, onBack: () -> Unit) 
 @Composable
 private fun Controls(s: SpeakerState, speaker: SpeakerController, app: BoksApp) {
     val bridge by app.bridge.status.collectAsState()
-    DeviceHeader(s)
+    val cycle by app.cycle.status.collectAsState()
+    val sleep by app.sleep.status.collectAsState()
+    DeviceHeader(s, speaker.demo)
     if (s.locked) {
         Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
             Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -254,16 +263,27 @@ private fun Controls(s: SpeakerState, speaker: SpeakerController, app: BoksApp) 
         }
     }
     s.brightness?.let { brightness ->
-        LevelCard("Brightness", Icons.Default.BrightnessMedium, brightness, speaker::setBrightness)
+        // Moving the slider takes over from a running fade.
+        LevelCard("Brightness", Icons.Default.BrightnessMedium, brightness, app.session::setBrightness)
     }
     s.energyLevel?.let { level ->
-        SectionCard("Light mode", Icons.Default.Lightbulb) { Choice(EnergyLevel.entries, level, { it.label }, speaker::setEnergyLevel) }
+        SectionCard("Light mode", Icons.Default.Lightbulb) { LightModePicker(level, speaker::setEnergyLevel) }
     }
     if (s.family == Family.LIGHT && s.rpcAvailable) {
-        SectionCard("Colours", Icons.Default.Palette) { PaletteSection(s, speaker, app.palettes) }
-        SectionCard("Effects", Icons.Default.Whatshot, trailing = { HintText("Hold to play") }) { FxPad(speaker) }
-        SectionCard("DMX bridge", Icons.Default.SettingsInputAntenna, trailing = { if (bridge.running) LiveBadge(receiving = bridge.packetsPerSecond > 0) }) {
-            DmxSection(app)
+        ScenesSection(s, app) { PaletteSection(s, speaker, app.palettes, app.cycle) }
+        SectionCard("Cycle", Icons.Default.Autorenew, trailing = { if (cycle.running) LiveBadge(receiving = true) }) { CycleSection(app, speaker) }
+        SectionCard("Sleep fade", Icons.Default.Bedtime, trailing = { if (sleep.running) LiveBadge(receiving = true) }) { SleepSection(app, speaker, bridge.running) }
+        SectionCard("Effects", Icons.Default.Whatshot, trailing = { HintText("Hold, slide up to lock") }) { FxPad(speaker) }
+        // Folded by default: most sessions never use it, and the status line says enough until they do.
+        var dmxExpanded by rememberSaveable { mutableStateOf(false) }
+        SectionCard(
+            "DMX bridge",
+            Icons.Default.SettingsInputAntenna,
+            trailing = { if (bridge.running) LiveBadge(receiving = bridge.packetsPerSecond > 0) },
+            expanded = dmxExpanded,
+            onExpandedChange = { dmxExpanded = it },
+        ) {
+            if (dmxExpanded) DmxSection(app) else DmxSummary(app)
         }
     }
     if (s.eq != null || (s.family == Family.BIFROST && s.rpcAvailable)) {
@@ -292,8 +312,38 @@ private fun Controls(s: SpeakerState, speaker: SpeakerController, app: BoksApp) 
             val options = listOf(0, 15, 30, 60, 120)
             Choice(options, minutes.takeIf { it in options }, ::autoOffLabel, speaker::setAutoOff)
             if (minutes !in options) HintText("Currently ${autoOffLabel(minutes)}, set elsewhere.")
+            if (minutes > 0) AutoOffCountdown(minutes, s.idleSince, s.activeInputs)
         }
     }
+}
+
+/**
+ * The auto power-off timer as a bar that drains, with the time left. The speaker doesn't report its
+ * timer, so this counts from when the app last saw no input active ([SpeakerState.idleSince]).
+ */
+@Composable
+private fun AutoOffCountdown(minutes: Int, idleSince: Long?, inputs: List<String>) {
+    val totalMs = minutes * 60_000L
+    val leftMs by produceState(totalMs, idleSince, totalMs) {
+        while (true) {
+            value = if (idleSince == null) totalMs else (idleSince + totalMs - SystemClock.elapsedRealtime()).coerceAtLeast(0)
+            delay(250)
+        }
+    }
+    val fraction by animateFloatAsState(leftMs.toFloat() / totalMs, label = "auto-off")
+    LinearProgressIndicator(progress = { fraction }, modifier = Modifier.fillMaxWidth().padding(top = 4.dp))
+    HintText(
+        when {
+            idleSince == null -> "Paused while ${inputs.joinToString(" and ").ifEmpty { "something" }} plays."
+            leftMs == 0L -> "Turning off…"
+            else -> "Turns off in about ${countdown(leftMs / 1000)} unless something plays."
+        },
+    )
+}
+
+private fun countdown(seconds: Long) = when {
+    seconds >= 3600 -> "${seconds / 3600}:${(seconds % 3600 / 60).toString().padStart(2, '0')}:${(seconds % 60).toString().padStart(2, '0')}"
+    else -> "${seconds / 60}:${(seconds % 60).toString().padStart(2, '0')}"
 }
 
 private fun autoOffLabel(minutes: Int) = when {
@@ -305,13 +355,14 @@ private fun autoOffLabel(minutes: Int) = when {
 /** Who this is and what it is doing; the facts that used to be a single line of text. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun DeviceHeader(s: SpeakerState) {
+private fun DeviceHeader(s: SpeakerState, demo: Boolean) {
     Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
         DeviceBadge(s.family, size = 64.dp)
         Spacer(Modifier.width(16.dp))
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(s.model?.label ?: "SOUNDBOKS device", style = MaterialTheme.typography.titleMedium)
             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (demo) Pill(null, "Demo")
                 s.battery?.let { Pill(batteryIcon(it), "$it%") }
                 s.activeInputs.forEach { Pill(null, it) }
                 s.firmware?.let { Pill(null, "Firmware $it") }
@@ -342,8 +393,8 @@ private fun Pill(icon: ImageVector?, text: String) {
 }
 
 @Composable
-internal fun HintText(text: String) {
-    Text(text, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+internal fun HintText(text: String, modifier: Modifier = Modifier) {
+    Text(text, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = modifier)
 }
 
 /** The DMX controls are hidden while the light is away, so the running bridge stays visible and stoppable here. */

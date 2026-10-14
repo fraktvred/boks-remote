@@ -1,5 +1,14 @@
 package dev.boksremote.ui
 
+import androidx.compose.animation.animateContentSize
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.indication
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.material3.ripple
+import androidx.compose.runtime.remember
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -8,6 +17,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Card
@@ -48,30 +58,57 @@ internal fun IconBadge(
     }
 }
 
-/** A titled card grouping related controls on the device screen. */
+/**
+ * A titled card grouping related controls on the device screen. Given [expanded], its header toggles
+ * it through [onExpandedChange], and [content] shows the full or the folded version to match.
+ */
 @Composable
 internal fun SectionCard(
     title: String,
     icon: ImageVector,
     modifier: Modifier = Modifier,
     trailing: @Composable () -> Unit = {},
+    expanded: Boolean? = null,
+    onExpandedChange: (Boolean) -> Unit = {},
     content: @Composable () -> Unit,
 ) {
     Card(
         modifier = modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
     ) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.animateContentSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            // The whole header toggles, but only the chevron shows the press.
+            val press = remember { MutableInteractionSource() }
+            val header = if (expanded == null) Modifier else Modifier.clickable(
+                interactionSource = press,
+                indication = null,
+                onClickLabel = if (expanded) "Collapse" else "Expand",
+            ) { onExpandedChange(!expanded) }
+            Row(header, verticalAlignment = Alignment.CenterVertically) {
                 Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
                 Spacer(Modifier.width(8.dp))
                 Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
                 trailing()
+                if (expanded != null) {
+                    Spacer(Modifier.width(4.dp))
+                    Icon(
+                        if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.indication(press, ripple(bounded = false, radius = 20.dp)),
+                    )
+                }
             }
             content()
         }
     }
 }
+
+/**
+ * For a [androidx.compose.material3.ModalBottomSheet]: a tall sheet otherwise expands up under the
+ * status bar, so this keeps it below it with a gap that shows the screen behind.
+ */
+internal fun Modifier.sheetTopMargin() = statusBarsPadding().padding(top = 16.dp)
 
 /** A small label above a control inside a [SectionCard]. */
 @Composable

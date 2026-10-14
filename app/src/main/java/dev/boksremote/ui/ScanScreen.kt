@@ -10,6 +10,7 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,12 +20,16 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.BluetoothSearching
@@ -32,6 +37,7 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.BluetoothDisabled
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.SignalCellularAlt
 import androidx.compose.material.icons.filled.SignalCellularAlt1Bar
@@ -40,10 +46,13 @@ import androidx.compose.material.icons.filled.Speaker
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.LargeTopAppBar
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -56,23 +65,40 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import dev.boksremote.R
 import dev.boksremote.ble.Scanner
 import dev.boksremote.protocol.Advertisement
+import dev.boksremote.speaker.DemoDevice
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ScanScreen(scanner: Scanner, onOpen: (Advertisement) -> Unit) {
+fun ScanScreen(
+    scanner: Scanner,
+    demoMode: Boolean,
+    onDemoModeChange: (Boolean) -> Unit,
+    onOpen: (Advertisement) -> Unit,
+    onOpenDemo: (DemoDevice) -> Unit,
+) {
     val results by scanner.results.collectAsState()
     val scanning by scanner.scanning.collectAsState()
     // Scanner.bluetoothEnabled is a plain getter, so bump this to re-read it after the enable prompt returns.
@@ -86,13 +112,22 @@ fun ScanScreen(scanner: Scanner, onOpen: (Advertisement) -> Unit) {
         scanner.start()
         onDispose { scanner.stop() }
     }
-    val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     val pullState = rememberPullToRefreshState()
     val scope = rememberCoroutineScope()
 
     Scaffold(
-        modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
-        topBar = { LargeTopAppBar(title = { Text("Boks Remote") }, scrollBehavior = scrollBehavior) },
+        topBar = {
+            // The menu sits beside the title rather than in a row above it, as in a large app bar.
+            Row(
+                Modifier.fillMaxWidth().windowInsetsPadding(TopAppBarDefaults.windowInsets).heightIn(min = 80.dp).padding(start = 16.dp, end = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                AppMark(40.dp)
+                Spacer(Modifier.width(12.dp))
+                AppTitle(Modifier.weight(1f))
+                ScanMenu(demoMode, onDemoModeChange)
+            }
+        },
     ) { padding ->
         // First-seen order: sorting by live RSSI made rows jump under the user's finger.
         val list = results.values.toList()
@@ -104,45 +139,50 @@ fun ScanScreen(scanner: Scanner, onOpen: (Advertisement) -> Unit) {
             state = pullState,
             modifier = Modifier.padding(padding).fillMaxSize(),
         ) {
-            when {
-                !bluetoothOn -> EmptyState(
-                    icon = Icons.Default.BluetoothDisabled,
-                    title = "Bluetooth is off",
-                    body = "Turn on Bluetooth to find speakers and lights nearby.",
-                    action = "Turn on Bluetooth",
-                    onAction = { enableBluetooth.launch(Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE)) },
-                )
-                list.isEmpty() && scanning -> EmptyState(
-                    icon = Icons.AutoMirrored.Filled.BluetoothSearching,
-                    title = "Looking for speakers and lights…",
-                    body = "Make sure your SOUNDBOKS or Lightboks is switched on and close by.",
-                    searching = true,
-                )
-                list.isEmpty() -> EmptyState(
-                    icon = Icons.Default.Speaker,
-                    title = "No speakers or lights found",
-                    body = "Check that your speaker or Lightboks is on, then scan again.",
-                    action = "Scan again",
-                    onAction = scanner::start,
-                )
-                else -> LazyColumn(
-                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                    modifier = Modifier.fillMaxSize(),
-                ) {
-                    item(key = "header") { ScanHeader(scanning, onScan = scanner::start) }
-                    items(list, key = { it.address }) { ad ->
-                        DeviceRow(ad, Modifier.animateItem()) { onOpen(ad) }
-                    }
-                    if (!scanning) {
-                        item(key = "hint") {
-                            Text(
-                                "Don't see yours? Switch it on, bring the phone closer and scan again.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                textAlign = TextAlign.Center,
-                                modifier = Modifier.fillMaxWidth().padding(top = 4.dp).animateItem(),
-                            )
+            Column(Modifier.fillMaxSize()) {
+                if (demoMode) DemoDevices(onOpen = onOpenDemo, onTurnOff = { onDemoModeChange(false) })
+                Box(Modifier.weight(1f)) {
+                    when {
+                        !bluetoothOn -> EmptyState(
+                            icon = Icons.Default.BluetoothDisabled,
+                            title = "Bluetooth is off",
+                            body = "Turn on Bluetooth to find speakers and lights nearby.",
+                            action = "Turn on Bluetooth",
+                            onAction = { enableBluetooth.launch(Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE)) },
+                        )
+                        list.isEmpty() && scanning -> EmptyState(
+                            icon = Icons.AutoMirrored.Filled.BluetoothSearching,
+                            title = "Looking for speakers and lights…",
+                            body = "Make sure your SOUNDBOKS or Lightboks is switched on and close by.",
+                            searching = true,
+                        )
+                        list.isEmpty() -> EmptyState(
+                            icon = Icons.Default.Speaker,
+                            title = "No speakers or lights found",
+                            body = "Check that your speaker or Lightboks is on, then scan again.",
+                            action = "Scan again",
+                            onAction = scanner::start,
+                        )
+                        else -> LazyColumn(
+                            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 16.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp),
+                            modifier = Modifier.fillMaxSize(),
+                        ) {
+                            item(key = "header") { ScanHeader(scanning, onScan = scanner::start) }
+                            items(list, key = { it.address }) { ad ->
+                                DeviceRow(ad, Modifier.animateItem()) { onOpen(ad) }
+                            }
+                            if (!scanning) {
+                                item(key = "hint") {
+                                    Text(
+                                        "Don't see yours? Switch it on, bring the phone closer and scan again.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        textAlign = TextAlign.Center,
+                                        modifier = Modifier.fillMaxWidth().padding(top = 4.dp).animateItem(),
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -170,8 +210,64 @@ private fun ScanHeader(scanning: Boolean, onScan: () -> Unit) {
     }
 }
 
+/** The launcher icon, its two layers cropped to the part a launcher shows. */
 @Composable
-private fun DeviceRow(ad: Advertisement, modifier: Modifier, onClick: () -> Unit) {
+private fun AppMark(size: Dp) {
+    Box(Modifier.size(size).clip(RoundedCornerShape(30)), contentAlignment = Alignment.Center) {
+        // Adaptive icon layers are 108 units with the visible 72 in the middle.
+        val layer = Modifier.requiredSize(size * 1.5f)
+        Image(painterResource(R.drawable.ic_launcher_bg), contentDescription = null, modifier = layer)
+        Image(painterResource(R.drawable.ic_launcher_fg), contentDescription = null, modifier = layer)
+    }
+}
+
+/** "Boks Remote", with "Remote" in the orange-to-pink of the logo's sound waves. */
+@Composable
+private fun AppTitle(modifier: Modifier) {
+    val waves = remember { Brush.linearGradient(listOf(Color(0xFFFF8A4C), Color(0xFFFF3D8B))) }
+    Text(
+        buildAnnotatedString {
+            append("Boks ")
+            withStyle(SpanStyle(brush = waves)) { append("Remote") }
+        },
+        style = MaterialTheme.typography.headlineMedium,
+        fontWeight = FontWeight.SemiBold,
+        maxLines = 1,
+        modifier = modifier,
+    )
+}
+
+@Composable
+private fun ScanMenu(demoMode: Boolean, onDemoModeChange: (Boolean) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    // The menu opens from its parent, so the box keeps it under the button rather than the whole header.
+    Box {
+        IconButton(onClick = { open = true }) { Icon(Icons.Default.MoreVert, contentDescription = "More options") }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            DropdownMenuItem(
+                text = { Text("Demo mode") },
+                onClick = { onDemoModeChange(!demoMode); open = false },
+                trailingIcon = { Checkbox(checked = demoMode, onCheckedChange = null) },
+            )
+        }
+    }
+}
+
+/** A dummy of each device over the scan, whose screens work without one at hand. */
+@Composable
+private fun DemoDevices(onOpen: (DemoDevice) -> Unit, onTurnOff: () -> Unit) {
+    Column(Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("Demo", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
+            TextButton(onClick = onTurnOff) { Text("Turn off") }
+        }
+        DemoDevice.entries.forEach { device -> DeviceRow(device.advert, Modifier, demo = true) { onOpen(device) } }
+    }
+}
+
+/** [demo]: a dummy, which has no signal to show. */
+@Composable
+private fun DeviceRow(ad: Advertisement, modifier: Modifier, demo: Boolean = false, onClick: () -> Unit) {
     val colors = MaterialTheme.colorScheme
     Card(
         onClick = onClick,
@@ -202,12 +298,14 @@ private fun DeviceRow(ad: Advertisement, modifier: Modifier, onClick: () -> Unit
                     modifier = Modifier.padding(end = 8.dp).size(20.dp),
                 )
             }
-            Icon(
-                signalIcon(ad.rssi),
-                contentDescription = "Signal ${ad.rssi} dBm",
-                tint = colors.onSurfaceVariant,
-                modifier = Modifier.size(20.dp),
-            )
+            if (!demo) {
+                Icon(
+                    signalIcon(ad.rssi),
+                    contentDescription = "Signal ${ad.rssi} dBm",
+                    tint = colors.onSurfaceVariant,
+                    modifier = Modifier.size(20.dp),
+                )
+            }
             Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = colors.onSurfaceVariant)
         }
     }

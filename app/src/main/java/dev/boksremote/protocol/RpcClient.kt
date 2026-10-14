@@ -6,9 +6,13 @@ import dev.boksremote.proto.ProtoWriter
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import java.util.UUID
 
@@ -28,6 +32,8 @@ class RpcClient(
     private val decoder = Hdlc.Decoder()
     private var nextCallId = 1
     private var pending: CompletableDeferred<ProtoMessage>? = null
+    /** The call [pending] waits for; a late answer to a call given up on carries another id and is dropped. */
+    private var pendingId = 0
     private val receiver: Job
 
     init {
@@ -37,7 +43,12 @@ class RpcClient(
                 for (frame in decoder.feed(n.value)) {
                     val waiter = pending ?: continue
                     frame.fold(
-                        onSuccess = { runCatching { ProtoMessage.parse(it) }.fold(waiter::complete, waiter::completeExceptionally) },
+                        onSuccess = { bytes ->
+                            runCatching { ProtoMessage.parse(bytes) }.fold(
+                                { packet -> if (packet.int(FIELD_CALL_ID) == pendingId) waiter.complete(packet) },
+                                waiter::completeExceptionally,
+                            )
+                        },
                         onFailure = { waiter.completeExceptionally(RpcException("bad frame: ${it.message}")) },
                     )
                 }
@@ -55,19 +66,23 @@ class RpcClient(
             val callId = nextCallId++
             val response = CompletableDeferred<ProtoMessage>()
             pending = response
+            pendingId = callId
             try {
                 val frame = Hdlc.frame(encodeRequest(service, method, request, callId))
                 val chunk = (gatt.mtu - 3).coerceAtLeast(20)
-                var offset = 0
-                while (offset < frame.size) {
-                    val end = minOf(offset + chunk, frame.size)
-                    gatt.write(txCharacteristic, frame.copyOfRange(offset, end))
-                    offset = end
+                // A frame cut off halfway would garble the next one, so a cancelled call still sends all of it.
+                withContext(NonCancellable) {
+                    var offset = 0
+                    while (offset < frame.size) {
+                        val end = minOf(offset + chunk, frame.size)
+                        gatt.write(txCharacteristic, frame.copyOfRange(offset, end))
+                        offset = end
+                    }
                 }
+                currentCoroutineContext().ensureActive()
                 val packet = withTimeout(timeoutMs) { response.await() }
                 val status = packet.int(FIELD_STATUS)
                 if (status != 0) throw RpcException("$service/$method failed with status $status", status)
-                if (packet.int(FIELD_CALL_ID) != callId) throw RpcException("$service/$method: response for another call")
                 ProtoMessage.parse(packet.bytes(FIELD_PAYLOAD))
             } finally {
                 pending = null

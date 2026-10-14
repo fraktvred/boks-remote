@@ -1,6 +1,5 @@
 package dev.boksremote.speaker
 
-import android.content.Context
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
@@ -12,9 +11,8 @@ data class EqPreset(val name: String, val bands: List<Int>)
  * active curve, so the active preset is recognised by matching its bands. The curve is the same
  * six bands on every model, so presets are shared across speakers.
  */
-class EqPresetStore(context: Context) {
-    private val prefs = context.getSharedPreferences("eq_presets", Context.MODE_PRIVATE)
-    private val _presets = MutableStateFlow(EqPresetCodec.decode(prefs.getString(KEY, null).orEmpty()))
+class EqPresetStore(private val store: KeyValue) {
+    private val _presets = MutableStateFlow(EqPresetCodec.decode(store[KEY].orEmpty()))
     val presets: StateFlow<List<EqPreset>> = _presets
 
     /** Saves [bands] under [name] (made unique) and returns the stored preset. */
@@ -48,7 +46,7 @@ class EqPresetStore(context: Context) {
 
     private fun write(list: List<EqPreset>) {
         _presets.value = list
-        prefs.edit().putString(KEY, EqPresetCodec.encode(list)).apply()
+        store[KEY] = EqPresetCodec.encode(list)
     }
 
     private companion object {

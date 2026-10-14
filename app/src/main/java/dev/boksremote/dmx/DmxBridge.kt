@@ -131,7 +131,7 @@ class DmxBridge(private val context: Context, private val scope: CoroutineScope)
         session = null
         // Don't leave an effect running that the desk can no longer release.
         val l = light
-        if (_status.value.look?.fx != null && l != null) scope.launch { runCatching { l.applyFx(LightContentCodec.NO_ID) } }
+        if (_status.value.look?.fx != null && l != null) scope.launch { runCatching { l.lightboks.applyFx(LightContentCodec.NO_ID) } }
         light = null
         multicastLock?.takeIf { it.isHeld }?.release()
         wifiLock?.takeIf { it.isHeld }?.release()
@@ -287,15 +287,15 @@ class DmxBridge(private val context: Context, private val scope: CoroutineScope)
             try {
                 when {
                     want.fx != sentFx -> {
-                        light.applyFx(want.fx?.id ?: LightContentCodec.NO_ID)
+                        light.lightboks.applyFx(want.fx?.id ?: LightContentCodec.NO_ID)
                         sentFx = want.fx
                     }
                     want.dimmer != sentDimmer -> {
-                        light.applyBrightness(want.dimmer)
+                        light.lightboks.applyBrightness(want.dimmer)
                         sentDimmer = want.dimmer
                     }
                     want.mode != sentMode -> {
-                        light.applyEnergyLevel(want.mode)
+                        light.lightboks.applyEnergyLevel(want.mode)
                         sentMode = want.mode
                     }
                     want.colors != sentColors -> {
@@ -309,7 +309,7 @@ class DmxBridge(private val context: Context, private val scope: CoroutineScope)
                         // Alternating between two fixed ids changes the id on every update (so the light
                         // never treats it as unchanged) without minting a new stored palette each time.
                         paletteSlot = !paletteSlot
-                        light.applyPalette(want.palette(), if (paletteSlot) PALETTE_ID_A else PALETTE_ID_B)
+                        light.lightboks.applyPalette(want.palette(), if (paletteSlot) PALETTE_ID_A else PALETTE_ID_B)
                         lastPaletteAt = System.currentTimeMillis()
                         sentColors = want.colors
                     }
