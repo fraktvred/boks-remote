@@ -1,11 +1,12 @@
 package dev.boksremote.ui
 
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -16,6 +17,7 @@ import androidx.compose.ui.geometry.lerp
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathFillType
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.PathBuilder
 import androidx.compose.ui.graphics.vector.group
@@ -28,19 +30,17 @@ import kotlin.math.cos
 import kotlin.math.sin
 import kotlin.math.sqrt
 
-/** White drawings on black, so the badge reads the same in both themes. */
-private val BACKDROP = Color(0xFF000000)
-private const val INK = 0xFFF2F2F2
-private const val GAP = 0xFF000000
-
 /** The device's drawing on a round backdrop; the app's visual anchor for a speaker or the Lightboks. */
 @Composable
 internal fun DeviceBadge(family: Family?, size: Dp = 48.dp) {
-    Surface(shape = CircleShape, color = BACKDROP, modifier = Modifier.size(size)) {
+    // Partway from the container colour to the surface: darker in the dark theme, lighter in the light one.
+    val backdrop = lerp(MaterialTheme.colorScheme.primaryContainer, MaterialTheme.colorScheme.surface, 0.35f)
+    Surface(shape = CircleShape, color = backdrop, modifier = Modifier.size(size)) {
         Box(contentAlignment = Alignment.Center) {
-            Image(
+            Icon(
                 if (family == Family.LIGHT) DeviceArt.Lightboks else DeviceArt.Speaker,
                 contentDescription = null,
+                tint = MaterialTheme.colorScheme.onPrimaryContainer,
                 modifier = Modifier.padding(size * 0.14f).fillMaxSize(),
             )
         }
@@ -48,8 +48,9 @@ internal fun DeviceBadge(family: Family?, size: Dp = 48.dp) {
 }
 
 /**
- * Flat drawings of the hardware, on a 24-unit grid like Material icons. Shapes nest inside each other
- * and are filled even-odd, so each ring, hole and dot is one subpath and a drawing needs few paths.
+ * Flat drawings of the hardware, on a 24-unit grid like Material icons. They are one colour, so they
+ * tint like icons: shapes nest inside each other and are filled even-odd, so each ring, hole and dot
+ * is one subpath, and gaps are cut out rather than painted over.
  */
 internal object DeviceArt {
     private val CENTER = Offset(12f, 12f)
@@ -75,16 +76,17 @@ internal object DeviceArt {
             listOf(-1f, 1f).map { sy -> CENTER + Offset(sx * (inner.width + 1f), sy * (inner.height + 1f)) }
         }
         ImageVector.Builder("Speaker", 24.dp, 24.dp, 24f, 24f).apply {
-            shape(INK) {
-                roundRect(Size(inner.width + rim, inner.height + rim), 1.6f)
-                roundRect(inner, 0.6f)
+            // The rim, with a gap cut around each bumper like the one around the Lightboks' cells.
+            group(clipPathData = PathBuilder().apply { canvasWithout(bumpers, 2.0f) }.nodes) {
+                shape {
+                    roundRect(Size(inner.width + rim, inner.height + rim), 1.6f)
+                    roundRect(inner, 0.6f)
+                }
             }
             group(clipPathData = PathBuilder().apply { roundRect(Size(cut, inner.height), 0f) }.nodes) {
-                shape(INK) { cells.forEach { polygon(hexagon(it, r, flatTop = false), corner = 0.3f) } }
+                shape { cells.forEach { polygon(hexagon(it, r, flatTop = false), corner = 0.3f) } }
             }
-            // Set off from the rim by a gap, like the Lightboks' cells.
-            shape(GAP) { bumpers.forEach { circle(it, 2.0f) } }
-            shape(INK) { bumpers.forEach { circle(it, 1.5f) } }
+            shape { bumpers.forEach { circle(it, 1.5f) } }
         }.build()
     }
 
@@ -96,7 +98,7 @@ internal object DeviceArt {
             CENTER + Offset(cos(a).toFloat(), sin(a).toFloat()) * 5.7f
         }
         ImageVector.Builder("Lightboks", 24.dp, 24.dp, 24f, 24f).apply {
-            shape(INK) {
+            shape {
                 polygon(hexagon(CENTER, 11.2f, flatTop = true), corner = 1.6f)
                 polygon(hexagon(CENTER, 9.9f, flatTop = true), corner = 1.2f)
                 cells.forEach { c ->
@@ -109,14 +111,28 @@ internal object DeviceArt {
     }
 }
 
-private fun ImageVector.Builder.shape(argb: Long, block: PathBuilder.() -> Unit) =
-    path(fill = SolidColor(Color(argb)), pathFillType = PathFillType.EvenOdd, pathBuilder = block)
+private fun ImageVector.Builder.shape(block: PathBuilder.() -> Unit) =
+    path(fill = SolidColor(Color.Black), pathFillType = PathFillType.EvenOdd, pathBuilder = block)
 
-private fun PathBuilder.circle(c: Offset, r: Float) {
+/** A circle, drawn clockwise unless [clockwise] is false. */
+private fun PathBuilder.circle(c: Offset, r: Float, clockwise: Boolean = true) {
     moveTo(c.x - r, c.y)
-    arcToRelative(r, r, 0f, true, true, 2 * r, 0f)
-    arcToRelative(r, r, 0f, true, true, -2 * r, 0f)
+    arcToRelative(r, r, 0f, true, clockwise, 2 * r, 0f)
+    arcToRelative(r, r, 0f, true, clockwise, -2 * r, 0f)
     close()
+}
+
+/**
+ * The whole canvas minus circles around [holes], for clipping. Clip paths fill non-zero, so the
+ * circles run against the canvas's direction to cancel it out.
+ */
+private fun PathBuilder.canvasWithout(holes: List<Offset>, r: Float) {
+    moveTo(0f, 0f)
+    horizontalLineTo(24f)
+    verticalLineTo(24f)
+    horizontalLineTo(0f)
+    close()
+    holes.forEach { circle(it, r, clockwise = false) }
 }
 
 /** A rectangle centred on the canvas, [half] its size in each direction, with corner radius [rad]. */
