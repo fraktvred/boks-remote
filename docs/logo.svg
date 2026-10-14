@@ -1,0 +1,74 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-label="Boks Remote">
+  <!-- A tilted speaker box throwing sound waves, with light glints for the Lightboks; orange matches the launcher icon. -->
+  <defs>
+    <radialGradient id="bg" cx="0.35" cy="0.3" r="0.9">
+      <stop offset="0" stop-color="#2E2330"/>
+      <stop offset="0.6" stop-color="#1B1B1F"/>
+      <stop offset="1" stop-color="#0E0E11"/>
+    </radialGradient>
+    <linearGradient id="front" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#FF9A5C"/>
+      <stop offset="0.5" stop-color="#FF6A3D"/>
+      <stop offset="1" stop-color="#E8432A"/>
+    </linearGradient>
+    <linearGradient id="side" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#B8401F"/>
+      <stop offset="1" stop-color="#7A2414"/>
+    </linearGradient>
+    <radialGradient id="cone" cx="0.4" cy="0.35" r="0.7">
+      <stop offset="0" stop-color="#44444C"/>
+      <stop offset="1" stop-color="#121215"/>
+    </radialGradient>
+    <radialGradient id="cap" cx="0.35" cy="0.3" r="0.8">
+      <stop offset="0" stop-color="#FFD2A8"/>
+      <stop offset="0.45" stop-color="#FF7A45"/>
+      <stop offset="1" stop-color="#C93A20"/>
+    </radialGradient>
+    <linearGradient id="wave" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#FF8A4C"/>
+      <stop offset="1" stop-color="#FF3D8B"/>
+    </linearGradient>
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="4" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="soft" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="10"/>
+    </filter>
+  </defs>
+
+  <rect width="256" height="256" rx="56" fill="url(#bg)"/>
+  <rect x="1" y="1" width="254" height="254" rx="55" fill="none" stroke="#FFFFFF" stroke-opacity="0.06" stroke-width="2"/>
+
+  <!-- floor glow -->
+  <ellipse cx="104" cy="222" rx="58" ry="10" fill="#FF5A3A" opacity="0.45" filter="url(#soft)"/>
+
+  <!-- sound waves, tilted with the speaker and centred on the woofer's axis -->
+  <g fill="none" stroke="url(#wave)" stroke-linecap="round" filter="url(#glow)" transform="rotate(-10 100 136) translate(0 4)">
+    <path d="M168 94A34 34 0 0 1 168 146" stroke-width="9"/>
+    <path d="M180.7 78.6A54 54 0 0 1 180.7 161.4" stroke-width="8" opacity="0.75"/>
+    <path d="M193.6 63.3A74 74 0 0 1 193.6 176.7" stroke-width="7" opacity="0.45"/>
+  </g>
+
+  <!-- speaker box -->
+  <g transform="rotate(-10 100 136)">
+    <rect x="60" y="56" width="96" height="148" rx="16" fill="url(#side)"/>
+    <rect x="48" y="64" width="96" height="148" rx="16" fill="url(#front)"/>
+    <path d="M64 64h64a16 16 0 0 1 16 16v4H48v-4a16 16 0 0 1 16-16z" fill="#FFFFFF" opacity="0.18"/>
+    <circle cx="96" cy="124" r="36" fill="#141417"/>
+    <circle cx="96" cy="124" r="29" fill="url(#cone)"/>
+    <circle cx="96" cy="124" r="29" fill="none" stroke="#FF6A3D" stroke-opacity="0.55" stroke-width="2"/>
+    <circle cx="96" cy="124" r="19" fill="none" stroke="#000000" stroke-opacity="0.35" stroke-width="2"/>
+    <circle cx="96" cy="124" r="11" fill="url(#cap)"/>
+    <circle cx="96" cy="184" r="10" fill="#141417"/>
+    <circle cx="96" cy="184" r="5" fill="url(#cap)"/>
+  </g>
+
+  <!-- light glints, framing speaker and waves on the diagonal -->
+  <g fill="#FFE3F0" filter="url(#glow)">
+    <path d="M206 186Q206 200 220 200Q206 200 206 214Q206 200 192 200Q206 200 206 186z"/>
+    <path d="M42 30Q42 40 52 40Q42 40 42 50Q42 40 32 40Q42 40 42 30z" opacity="0.85"/>
+  </g>
+  <circle cx="186" cy="222" r="2.5" fill="#FFB3D2" opacity="0.7"/>
+  <circle cx="64" cy="26" r="2" fill="#FFB3D2" opacity="0.6"/>
+</svg>

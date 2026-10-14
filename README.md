@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/logo.svg" width="128" alt="Boks Remote logo"></p>
+
 # Boks Remote
 
 An independent Android controller for SOUNDBOKS speakers and the Lightboks over Bluetooth LE. It needs no account or cloud.
