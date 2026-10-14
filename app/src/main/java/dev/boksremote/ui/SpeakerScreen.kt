@@ -40,7 +40,6 @@ import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.SettingsInputAntenna
-import androidx.compose.material.icons.filled.Speaker
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.Whatshot
 import androidx.compose.material3.AlertDialog
@@ -305,7 +304,7 @@ private fun autoOffLabel(minutes: Int) = when {
 @Composable
 private fun DeviceHeader(s: SpeakerState) {
     Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-        IconBadge(if (s.family == Family.LIGHT) Icons.Default.Lightbulb else Icons.Default.Speaker, size = 64.dp, iconSize = 32.dp)
+        DeviceBadge(s.family, size = 64.dp)
         Spacer(Modifier.width(16.dp))
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(s.model?.label ?: "SOUNDBOKS device", style = MaterialTheme.typography.titleMedium)

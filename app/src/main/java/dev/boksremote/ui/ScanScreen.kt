@@ -31,7 +31,6 @@ import androidx.compose.material.icons.automirrored.filled.BluetoothSearching
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.BluetoothDisabled
-import androidx.compose.material.icons.filled.Lightbulb
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.SignalCellularAlt
@@ -69,7 +68,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.boksremote.ble.Scanner
 import dev.boksremote.protocol.Advertisement
-import dev.boksremote.protocol.Family
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -175,20 +173,13 @@ private fun ScanHeader(scanning: Boolean, onScan: () -> Unit) {
 @Composable
 private fun DeviceRow(ad: Advertisement, modifier: Modifier, onClick: () -> Unit) {
     val colors = MaterialTheme.colorScheme
-    val light = ad.family == Family.LIGHT
     Card(
         onClick = onClick,
         modifier = modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = colors.surfaceContainerLow),
     ) {
         Row(Modifier.padding(horizontal = 16.dp, vertical = 20.dp), verticalAlignment = Alignment.CenterVertically) {
-            IconBadge(
-                if (light) Icons.Default.Lightbulb else Icons.Default.Speaker,
-                size = 56.dp,
-                iconSize = 28.dp,
-                container = if (light) colors.tertiaryContainer else colors.primaryContainer,
-                content = if (light) colors.onTertiaryContainer else colors.onPrimaryContainer,
-            )
+            DeviceBadge(ad.family, size = 56.dp)
             Spacer(Modifier.width(16.dp))
             Column(Modifier.weight(1f)) {
                 Text(ad.name ?: ad.model?.label ?: "SOUNDBOKS device", style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
