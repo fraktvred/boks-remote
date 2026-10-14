@@ -21,7 +21,6 @@ enum class DemoDevice(val advert: Advertisement, val initial: SpeakerState) {
             teamUp = TeamUpMode.SOLO,
             brightness = 200,
             energyLevel = EnergyLevel.MEDIUM,
-            autoOffMinutes = 30,
             paletteIsDefault = true,
             rpcAvailable = true,
         ),
@@ -40,7 +39,8 @@ enum class DemoDevice(val advert: Advertisement, val initial: SpeakerState) {
             teamUp = TeamUpMode.SOLO,
             eq = EqMode.DEFAULT,
             eqBands = EqCurve.FLAT,
-            activeInputs = listOf("Bluetooth"),
+            // Nothing plays, so its auto power-off counts down.
+            activeInputs = emptyList(),
             autoOffMinutes = 30,
             rpcAvailable = true,
         ),

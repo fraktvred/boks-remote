@@ -22,6 +22,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -58,6 +61,12 @@ data class SpeakerState(
     val brightness: Int? = null, // 0..255
     val energyLevel: EnergyLevel? = null,
     val autoOffMinutes: Int? = null,
+    /**
+     * [Clock.ELAPSED] time since when no input has been active, which is when the auto power-off timer
+     * runs; null while one is. The speaker doesn't report its timer, so this is the app's own estimate,
+     * counted from no earlier than the connection.
+     */
+    val idleSince: Long? = null,
     val palette: LightPalette? = null,
     val paletteIsDefault: Boolean = false,
     val rpcAvailable: Boolean = false,
@@ -122,6 +131,12 @@ class SpeakerController private constructor(
         } else {
             connectLink()
         }
+        jobs += scope.launch {
+            _state.map { it.connection == ConnectionState.CONNECTED && it.activeInputs.isEmpty() }.distinctUntilChanged().collect { idle ->
+                _state.update { it.copy(idleSince = if (idle) Clock.ELAPSED.now() else null) }
+            }
+        }
+        if (demo) jobs += scope.launch { demoAutoOff() }
         jobs += scope.launch { for (v in volumeWrites) attempt("volume") { writeVolume(v) } }
         jobs += scope.launch {
             for (id in fxWrites) attempt("effect") { lightboks.applyFx(id) }
@@ -152,6 +167,17 @@ class SpeakerController private constructor(
                 if (s == GattConnection.State.DISCONNECTED && _state.value.connection == ConnectionState.CONNECTED) dropped()
             }
         }
+    }
+
+    /** A demo speaker turns itself off like a real one once its auto power-off time is up. */
+    private suspend fun demoAutoOff() {
+        _state.map { s -> s.idleSince?.let { since -> s.autoOffMinutes?.takeIf { it > 0 }?.let { since + it * 60_000L } } }
+            .distinctUntilChanged()
+            .collectLatest { offAt ->
+                if (offAt == null) return@collectLatest
+                delay(offAt - Clock.ELAPSED.now())
+                dropped()
+            }
     }
 
     private fun dropped() =
@@ -493,7 +519,8 @@ class SpeakerController private constructor(
     fun setAutoOff(minutes: Int) = control("auto-off") {
         val r = call("SystemService", "SetAutoOff", proto { uint32(1, minutes) })
         if (r.int(1) != 0) throw IllegalStateException("speaker rejected the value")
-        _state.update { it.copy(autoOffMinutes = minutes) }
+        // A new setting starts the timer over.
+        _state.update { it.copy(autoOffMinutes = minutes, idleSince = it.idleSince?.let { Clock.ELAPSED.now() }) }
     }
 
     /** SystemService.PowerOff{type: REBOOT}. Only RPC devices can restart; the link drops while it boots. */

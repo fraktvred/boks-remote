@@ -1,6 +1,8 @@
 package dev.boksremote.ui
 
+import android.os.SystemClock
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
@@ -53,6 +55,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -71,6 +74,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -92,6 +96,7 @@ import dev.boksremote.speaker.SpeakerState
 import dev.boksremote.speaker.StereoRole
 import dev.boksremote.speaker.TeamUpMode
 import kotlin.math.roundToInt
+import kotlinx.coroutines.delay
 
 /** About 5 % of the 0..255 wire range per tap of the volume buttons. */
 private const val LEVEL_STEP = 13
@@ -307,8 +312,38 @@ private fun Controls(s: SpeakerState, speaker: SpeakerController, app: BoksApp) 
             val options = listOf(0, 15, 30, 60, 120)
             Choice(options, minutes.takeIf { it in options }, ::autoOffLabel, speaker::setAutoOff)
             if (minutes !in options) HintText("Currently ${autoOffLabel(minutes)}, set elsewhere.")
+            if (minutes > 0) AutoOffCountdown(minutes, s.idleSince, s.activeInputs)
         }
     }
+}
+
+/**
+ * The auto power-off timer as a bar that drains, with the time left. The speaker doesn't report its
+ * timer, so this counts from when the app last saw no input active ([SpeakerState.idleSince]).
+ */
+@Composable
+private fun AutoOffCountdown(minutes: Int, idleSince: Long?, inputs: List<String>) {
+    val totalMs = minutes * 60_000L
+    val leftMs by produceState(totalMs, idleSince, totalMs) {
+        while (true) {
+            value = if (idleSince == null) totalMs else (idleSince + totalMs - SystemClock.elapsedRealtime()).coerceAtLeast(0)
+            delay(250)
+        }
+    }
+    val fraction by animateFloatAsState(leftMs.toFloat() / totalMs, label = "auto-off")
+    LinearProgressIndicator(progress = { fraction }, modifier = Modifier.fillMaxWidth().padding(top = 4.dp))
+    HintText(
+        when {
+            idleSince == null -> "Paused while ${inputs.joinToString(" and ").ifEmpty { "something" }} plays."
+            leftMs == 0L -> "Turning off…"
+            else -> "Turns off in about ${countdown(leftMs / 1000)} unless something plays."
+        },
+    )
+}
+
+private fun countdown(seconds: Long) = when {
+    seconds >= 3600 -> "${seconds / 3600}:${(seconds % 3600 / 60).toString().padStart(2, '0')}:${(seconds % 60).toString().padStart(2, '0')}"
+    else -> "${seconds / 60}:${(seconds % 60).toString().padStart(2, '0')}"
 }
 
 private fun autoOffLabel(minutes: Int) = when {
