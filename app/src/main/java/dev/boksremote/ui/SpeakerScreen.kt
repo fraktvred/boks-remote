@@ -123,8 +123,8 @@ fun SpeakerScreen(speaker: SpeakerController, app: BoksApp, onBack: () -> Unit) 
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         topBar = {
             TopAppBar(
-                title = { Text(s.name ?: s.model?.label ?: "Speaker", maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back to speaker list") } },
+                title = { Text(s.name ?: s.model?.label ?: s.kind.replaceFirstChar(Char::uppercase), maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back to device list") } },
                 actions = {
                     if (s.rpcAvailable && connected) {
                         IconButton(onClick = { renaming = true }) { Icon(Icons.Default.Edit, "Rename") }
@@ -153,9 +153,9 @@ fun SpeakerScreen(speaker: SpeakerController, app: BoksApp, onBack: () -> Unit) 
                     s.connection == ConnectionState.CONNECTING -> StatusPanel {
                         CircularProgressIndicator()
                         Spacer(Modifier.height(24.dp))
-                        Text("Connecting to ${s.name ?: s.model?.label ?: "speaker"}…", style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center)
+                        Text("Connecting to ${s.name ?: s.model?.label ?: "the ${s.kind}"}…", style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center)
                         Spacer(Modifier.height(8.dp))
-                        Text("Keep the phone close to the speaker.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("Keep the phone close to the ${s.kind}.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         Spacer(Modifier.height(24.dp))
                         TextButton(onClick = onBack) { Text("Cancel") }
                         if (bridge.running) BridgeReconnectNote(app)
@@ -169,14 +169,14 @@ fun SpeakerScreen(speaker: SpeakerController, app: BoksApp, onBack: () -> Unit) 
                         )
                         Spacer(Modifier.height(8.dp))
                         Text(
-                            connectionError ?: "The speaker may be off or out of range.",
+                            connectionError ?: "The ${s.kind} may be off or out of range.",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             textAlign = TextAlign.Center,
                         )
                         Spacer(Modifier.height(24.dp))
                         Button(onClick = { connectionError = null; speaker.connect() }) { Text("Reconnect") }
-                        TextButton(onClick = onBack) { Text("Back to speaker list") }
+                        TextButton(onClick = onBack) { Text("Back to device list") }
                         if (bridge.running) BridgeReconnectNote(app)
                     }
                 }
@@ -186,6 +186,7 @@ fun SpeakerScreen(speaker: SpeakerController, app: BoksApp, onBack: () -> Unit) 
 
     if (s.pincodeRequired) {
         PincodeDialog(
+            kind = s.kind,
             error = pincodeError,
             onSubmit = { pincodeError = null; speaker.submitPincode(it) },
             onCancel = onBack,
@@ -196,11 +197,11 @@ fun SpeakerScreen(speaker: SpeakerController, app: BoksApp, onBack: () -> Unit) 
         AlertDialog(
             onDismissRequest = { confirmPowerOff = false },
             icon = { Icon(Icons.Default.PowerSettingsNew, contentDescription = null) },
-            title = { Text("Power off ${s.name ?: "speaker"}?") },
+            title = { Text("Power off ${s.name ?: "the ${s.kind}"}?") },
             text = {
                 Text(
-                    if (s.rpcAvailable) "You'll need to switch it on at the speaker again. Restart turns it back on by itself."
-                    else "You'll need to switch it on at the speaker again.",
+                    if (s.rpcAvailable) "You'll need to switch it on at the ${s.kind} again. Restart turns it back on by itself."
+                    else "You'll need to switch it on at the ${s.kind} again.",
                 )
             },
             confirmButton = {
@@ -224,7 +225,7 @@ private fun Controls(s: SpeakerState, speaker: SpeakerController, app: BoksApp) 
                 Icon(Icons.Default.Lock, contentDescription = null, tint = MaterialTheme.colorScheme.onErrorContainer)
                 Spacer(Modifier.width(12.dp))
                 Text(
-                    "This speaker is anti-theft locked. Unlock it in the official SOUNDBOKS app first.",
+                    "This ${s.kind} is anti-theft locked. Unlock it in the official SOUNDBOKS app first.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onErrorContainer,
                 )
@@ -404,13 +405,16 @@ private fun LevelCard(
     }
 }
 
+/** What the connected device is called in sentences: the Lightboks, or a speaker. */
+private val SpeakerState.kind get() = if (family == Family.LIGHT) "Lightboks" else "speaker"
+
 @Composable
 private fun StatusPanel(content: @Composable () -> Unit) {
     Column(Modifier.fillMaxWidth().padding(top = 96.dp, start = 16.dp, end = 16.dp), horizontalAlignment = Alignment.CenterHorizontally) { content() }
 }
 
 @Composable
-private fun PincodeDialog(error: String?, onSubmit: (String) -> Unit, onCancel: () -> Unit) {
+private fun PincodeDialog(kind: String, error: String?, onSubmit: (String) -> Unit, onCancel: () -> Unit) {
     var pin by remember { mutableStateOf("") }
     AlertDialog(
         onDismissRequest = onCancel,
@@ -418,7 +422,7 @@ private fun PincodeDialog(error: String?, onSubmit: (String) -> Unit, onCancel: 
         title = { Text("Enter pincode") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("This speaker is protected by its owner. The pincode is remembered on this phone.")
+                Text("This $kind is protected by its owner. The pincode is remembered on this phone.")
                 OutlinedTextField(
                     value = pin,
                     onValueChange = { pin = it.trim() },

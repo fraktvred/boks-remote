@@ -113,7 +113,7 @@ class SpeakerController(
         jobs += scope.launch {
             gatt.state.collect { s ->
                 if (s == GattConnection.State.DISCONNECTED && _state.value.connection == ConnectionState.CONNECTED) {
-                    _state.update { it.copy(connection = ConnectionState.DISCONNECTED, message = "Speaker disconnected") }
+                    _state.update { it.copy(connection = ConnectionState.DISCONNECTED, message = if (family == Family.LIGHT) "Lightboks disconnected" else "Speaker disconnected") }
                 }
             }
         }
