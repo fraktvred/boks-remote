@@ -8,6 +8,7 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlin.math.abs
+import java.util.Locale
 
 /**
  * Developer tool: checks whether the speaker applies the per-input gain and EQ the firmware
@@ -51,7 +52,7 @@ object InputProbe {
                     val r = measureAfter("EQ: band ${i + 1} of $bandCount") { speaker.setAuxEq(List(bandCount) { if (it == i) 10f else 0f }) }
                     DoubleArray(grid.size) { r[it] - flat[it] }
                 }
-                grid.forEachIndexed { g, hz -> Log.i(TAG, "%.1f,".format(hz) + responses.joinToString(",") { "%.2f".format(it[g]) }) }
+                grid.forEachIndexed { g, hz -> Log.i(TAG, "%.1f,".format(Locale.ROOT, hz) + responses.joinToString(",") { "%.2f".format(Locale.ROOT, it[g]) }) }
                 responses.forEachIndexed { i, r ->
                     val peak = r.indices.maxBy { abs(r[it]) }
                     Log.i(TAG, "band ${i + 1}: %+.1f dB at %.0f Hz".format(r[peak], grid[peak]))

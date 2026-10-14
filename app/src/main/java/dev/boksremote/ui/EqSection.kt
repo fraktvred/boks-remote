@@ -11,6 +11,7 @@ import dev.boksremote.audio.BandModels
 import dev.boksremote.audio.InputProbe
 import dev.boksremote.audio.RoomMeter
 import kotlinx.coroutines.launch
+import java.io.File
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -188,9 +189,10 @@ internal fun EqSection(s: SpeakerState, speaker: SpeakerController, store: EqPre
             Spacer(Modifier.width(8.dp))
             Text("Tune to this room")
         }
-        if (tuning) RoomCorrectionSheet(s, speaker, store, shapes, onDismiss = { tuning = false })
+        if (tuning) RoomCorrectionWizard(s, speaker, store, shapes, onDismiss = { tuning = false })
     }
-    DebugTool("Calibrate bands (debug)", speaker, BandCalibration::run)
+    val calibrationCsv = File(LocalContext.current.getExternalFilesDir(null), "bandcal.csv")
+    DebugTool("Calibrate bands (debug)", speaker) { sp, meter, progress -> BandCalibration.run(sp, meter, calibrationCsv, progress) }
     DebugTool("Probe AUX input (debug)", speaker, InputProbe::run)
 
     if (naming) {

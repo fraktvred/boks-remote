@@ -11,6 +11,7 @@ import android.media.AudioRecord
 import android.media.AudioTrack
 import android.media.MediaRecorder
 import androidx.annotation.RequiresPermission
+import dev.boksremote.speaker.SpeakerController
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.Channel
@@ -22,7 +23,31 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.log10
 
-class MeasurementException(message: String) : Exception(message)
+open class MeasurementException(message: String) : Exception(message)
+
+/** The microphone clipped: the speaker is too loud for where the phone is. */
+class TooLoudException : MeasurementException("Too loud for the microphone. Turn the volume down and try again.")
+
+/**
+ * Runs [block], turning the speaker down a step and trying again while the microphone overloads.
+ * Close to a big speaker, a phone microphone clips well below listening volume. The speaker stays
+ * at the volume that worked; callers put the user's volume back when they are done.
+ */
+suspend fun <T> SpeakerController.fitToMicrophone(block: suspend () -> T): T {
+    while (true) {
+        try {
+            return block()
+        } catch (e: TooLoudException) {
+            val lower = ((state.value.volume ?: throw e) * 0.7).toInt()
+            if (lower < MIN_MEASURE_VOLUME) throw e
+            setVolume(lower)
+            delay(500)
+        }
+    }
+}
+
+/** About 4 %; below this the speaker is too quiet to beat a room's background noise. */
+private const val MIN_MEASURE_VOLUME = 10
 
 /**
  * Measures the speaker through the phone's microphone with sine sweeps played over the current
@@ -32,6 +57,17 @@ class MeasurementException(message: String) : Exception(message)
 class RoomMeter(context: Context) {
     private val audio = context.getSystemService(AudioManager::class.java)
     private val sweep = Spectrum.logSweep(SWEEP_S)
+
+    /** The microphone to record with; null is the phone's own. */
+    var mic: AudioDeviceInfo? = null
+
+    /**
+     * Plugged-in microphones that can measure: USB (measurement microphones like a UMIK-1 or
+     * iMM-6C) and wired. Bluetooth headsets are left out: their microphones only run in call mode,
+     * which also drops the music to call quality.
+     */
+    fun externalMics(): List<AudioDeviceInfo> =
+        audio.getDevices(AudioManager.GET_DEVICES_INPUTS).filter { it.type in EXTERNAL_MIC_TYPES }
 
     /** True when media plays through a Bluetooth speaker; measuring the phone's own speaker is pointless. */
     fun outputIsBluetooth(): Boolean = audio.getAudioDevicesForAttributes(MEDIA).firstOrNull()?.type.let {
@@ -128,7 +164,7 @@ class RoomMeter(context: Context) {
     private fun checkLevel(recorded: FloatArray) {
         if (Spectrum.rmsDbfs(recorded) < -65) throw MeasurementException("Couldn't hear the speaker. Turn the volume up and try again.")
         if (recorded.count { kotlin.math.abs(it) > 0.99f } > recorded.size / 1000) {
-            throw MeasurementException("Too loud for the microphone. Turn the volume down and try again.")
+            throw TooLoudException()
         }
     }
 
@@ -149,7 +185,18 @@ class RoomMeter(context: Context) {
         if (recorder.state != AudioRecord.STATE_INITIALIZED) throw MeasurementException("Microphone unavailable")
         val out = FloatArray(count)
         try {
+            mic?.let { wanted ->
+                if (externalMics().none { it.id == wanted.id }) {
+                    throw MeasurementException("${wanted.productName} isn't connected any more. Plug it back in, or pick the phone's microphone.")
+                }
+                recorder.setPreferredDevice(wanted)
+            }
             recorder.startRecording()
+            // Android may still record from another microphone; mixing microphones within one
+            // tuning would leave their difference in the result.
+            mic?.let { wanted ->
+                if (recorder.routedDevice?.id != wanted.id) throw MeasurementException("Couldn't record from ${wanted.productName}. Unplug it and plug it back in.")
+            }
             var read = 0
             while (read < count) {
                 val n = recorder.read(out, read, count - read, AudioRecord.READ_BLOCKING)
@@ -178,6 +225,14 @@ class RoomMeter(context: Context) {
         /** The direct sound has to arrive within this; later peaks would be reflections. */
         const val MAX_DELAY = (1.2 * Spectrum.SAMPLE_RATE).toInt()
         const val TYPICAL_DELAY = (0.3 * Spectrum.SAMPLE_RATE).toInt()
+        val EXTERNAL_MIC_TYPES = setOf(
+            AudioDeviceInfo.TYPE_USB_DEVICE,
+            AudioDeviceInfo.TYPE_USB_HEADSET,
+            AudioDeviceInfo.TYPE_USB_ACCESSORY,
+            AudioDeviceInfo.TYPE_WIRED_HEADSET,
+            AudioDeviceInfo.TYPE_LINE_ANALOG,
+            AudioDeviceInfo.TYPE_LINE_DIGITAL,
+        )
         val MEDIA: AudioAttributes = AudioAttributes.Builder()
             .setUsage(AudioAttributes.USAGE_MEDIA)
             .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)

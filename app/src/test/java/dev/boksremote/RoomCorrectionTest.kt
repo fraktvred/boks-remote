@@ -1,10 +1,14 @@
 package dev.boksremote
 
+import dev.boksremote.audio.BandModels
 import dev.boksremote.audio.BandShape
 import dev.boksremote.audio.BandShape.Type
+import dev.boksremote.audio.Place
 import dev.boksremote.audio.RoomCorrection
+import dev.boksremote.audio.SoundGoal
 import dev.boksremote.audio.Spectrum
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import kotlin.math.PI
@@ -146,6 +150,56 @@ class RoomCorrectionTest {
         assertTrue("got ${r.bands}", r.afterRmsDb < 0.4)
         // Overlapping bands can trade off; an equally good answer with smaller moves is better.
         assertTrue("got ${r.bands}, want at most the moves of $target", r.bands.sumOf { it * it } <= target.sumOf { it * it })
+    }
+
+    @Test
+    fun bassGoalLiftsTheLowEndOfAFlatRoom() {
+        val r = RoomCorrection.fit(DoubleArray(grid.size), shapes, Place.OUTDOORS, SoundGoal.BASS)
+        assertTrue("got ${r.bands}", r.bands[0] >= 4)
+        assertTrue("treble should stay put: ${r.bands}", r.bands[5] in -1..1)
+        assertFalse(RoomCorrection.isNegligible(r))
+    }
+
+    @Test
+    fun bassGoalKeepsARoomsBassBumpInsteadOfCuttingIt() {
+        // Indoors the room already adds the low end a bass lover wants; only balanced cuts it.
+        val room = DoubleArray(grid.size) { BandShape(Type.LOW_SHELF, 120.0, 0.7).responseDb(grid[it], 6.0) }
+        val balanced = RoomCorrection.fit(room, shapes, Place.INDOORS, SoundGoal.BALANCED)
+        val bass = RoomCorrection.fit(room, shapes, Place.INDOORS, SoundGoal.BASS)
+        assertTrue("got ${balanced.bands}", balanced.bands[0] <= -4)
+        assertTrue("got ${bass.bands}", bass.bands[0] in -1..1)
+    }
+
+    @Test
+    fun outdoorsMayBoostFurther() {
+        val room = DoubleArray(grid.size) { BandShape(Type.PEAK, 600.0, 1.0).responseDb(grid[it], -9.0) }
+        assertEquals(Place.OUTDOORS.maxBoost, RoomCorrection.fit(room, shapes, Place.OUTDOORS).bands[2])
+    }
+
+    @Test
+    fun mixBandsAreFlatToppedWithSteepEdges() {
+        val band2 = BandModels.MIX[1]
+        assertEquals(10.0, band2.responseDb(180.0, 10.0), 0.5)
+        assertEquals(-10.0, band2.responseDb(180.0, -10.0), 0.5)
+        assertEquals(5.0, band2.responseDb(180.0, 5.0), 0.25)
+        assertEquals(0.0, band2.responseDb(600.0, 10.0), 0.5)
+        assertEquals(0.0, band2.responseDb(50.0, 10.0), 0.5)
+    }
+
+    @Test
+    fun mixCutsABassBoom() {
+        val room = DoubleArray(grid.size) { BandShape(Type.PEAK, 180.0, 1.4).responseDb(grid[it], 7.0) }
+        val r = RoomCorrection.fit(room, BandModels.MIX)
+        assertTrue("band 2 should cut: ${r.bands}", r.bands[1] <= -4)
+        assertTrue("treble should stay put: ${r.bands}", r.bands[5] in -1..1)
+        assertTrue("${r.beforeRmsDb} -> ${r.afterRmsDb}", r.afterRmsDb < r.beforeRmsDb / 2)
+    }
+
+    @Test
+    fun mixBassGoalLiftsTheLowestBand() {
+        val r = RoomCorrection.fit(DoubleArray(grid.size), BandModels.MIX, Place.OUTDOORS, SoundGoal.BASS)
+        assertTrue("got ${r.bands}", r.bands[0] >= 4)
+        assertTrue("got ${r.bands}", r.bands.drop(2).all { it in -1..1 })
     }
 
     @Test
