@@ -33,7 +33,7 @@ Bluetooth LE only, with no account and no cloud.</p>
 > **Not affiliated with SOUNDBOKS.** Boks Remote is an unofficial community project, not made, endorsed or supported by SOUNDBOKS ApS. "SOUNDBOKS" and "Lightboks" are trademarks of their owner and are used here only to say which devices the app works with. Use it at your own risk.
 
 <p align="center">
-  <img src="docs/screenshots/speaker.png" width="200" alt="Speaker screen with volume and sound profiles">
+  <img src="docs/screenshots/custom-eq.png" width="200" alt="Speaker screen with volume and a custom six-band EQ curve">
   <img src="docs/screenshots/room-tuning.png" width="200" alt="Room tuning wizard">
   <img src="docs/screenshots/lightboks.png" width="200" alt="Lightboks screen with brightness, light mode and colours">
   <img src="docs/screenshots/dmx-bridge.png" width="200" alt="Effects pad and DMX bridge">
