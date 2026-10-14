@@ -155,24 +155,43 @@ def take(shots: list[str], work: Path):
             back()
         back()
 
-    light_shots = [s for s in ("lightboks", "palettes", "dmx-bridge") if s in shots]
+    light_shots = [s for s in ("lightboks", "palettes", "palette-editor", "dmx-bridge") if s in shots]
     if light_shots:
         open_device("Lightboks")
         if "lightboks" in shots:
             shot("lightboks", work)
         if "palettes" in shots:
-            tap("Palettes")
+            # The palette's row opens them; its status line is the one fixed text in it.
+            status = next(n for n in nodes() if n.text in ("Preset", "Your palette", "Not saved", "Chosen by the light"))
+            x, y = status.center
+            adb("shell", "input", "tap", str(x), str(y))
             wait_for("Colour palettes")
             shot("palettes", work)
             back()
+        if "palette-editor" in shots:
+            # The colour strip's swatches have no text; Main 1's label sits just below its swatch.
+            label = wait_for("Main 1")
+            x, _ = label.center
+            adb("shell", "input", "tap", str(x), str(label.top - 60))
+            wait_for("Preview on the light")
+            shot("palette-editor", work)
+            back()  # discards the draft and puts the light's palette back
         if "dmx-bridge" in shots:
+            # The card starts folded, near the end of the screen, too low to scroll into place until it unfolds.
+            for _ in range(6):
+                if find("DMX bridge"):
+                    break
+                adb("shell", "input", "swipe", "20", "1800", "20", "1000", "500")
+                time.sleep(1)
+            tap("DMX bridge")
+            wait_for("Protocol")
             scroll_until("DMX bridge", 815)
             shot("dmx-bridge", work)
         back()
 
 
 def main():
-    shots = ["devices", "speaker", "custom-eq", "room-tuning", "lightboks", "palettes", "dmx-bridge"]
+    shots = ["devices", "speaker", "custom-eq", "room-tuning", "lightboks", "palettes", "palette-editor", "dmx-bridge"]
     unknown = set(sys.argv[1:]) - set(shots)
     if unknown:
         sys.exit(f"unknown shots: {', '.join(sorted(unknown))}; choose from {', '.join(shots)}")

@@ -33,10 +33,11 @@ Bluetooth LE only, with no account and no cloud.</p>
 > **Not affiliated with SOUNDBOKS.** Boks Remote is an unofficial community project, not made, endorsed or supported by SOUNDBOKS ApS. "SOUNDBOKS" and "Lightboks" are trademarks of their owner and are used here only to say which devices the app works with. Use it at your own risk.
 
 <p align="center">
-  <img src="docs/screenshots/custom-eq.png" width="200" alt="Speaker screen with volume and a custom six-band EQ curve">
-  <img src="docs/screenshots/room-tuning.png" width="200" alt="Room tuning wizard">
-  <img src="docs/screenshots/lightboks.png" width="200" alt="Lightboks screen with brightness, light mode and colours">
-  <img src="docs/screenshots/dmx-bridge.png" width="200" alt="Effects pad and DMX bridge">
+  <img src="docs/screenshots/custom-eq.png" width="160" alt="Speaker screen with volume and a custom six-band EQ curve">
+  <img src="docs/screenshots/room-tuning.png" width="160" alt="Room tuning wizard">
+  <img src="docs/screenshots/lightboks.png" width="160" alt="Lightboks screen with brightness, light mode, the scene in use and its colours">
+  <img src="docs/screenshots/palette-editor.png" width="160" alt="Palette editor with a live preview on the light">
+  <img src="docs/screenshots/dmx-bridge.png" width="160" alt="Effects pad and DMX bridge">
 </p>
 
 ## Install
@@ -58,6 +59,9 @@ Every release is signed with the same key, so a newer APK installs over the old 
 | **Room tuning by microphone** | approx. | Mix; others approx. | – | **–** |
 | **DMX bridge (Art-Net / sACN)** | – | – | ✓ | **–** |
 | **Cycle: rotate through chosen palettes on a timer** | – | – | ✓ | **–** |
+| **Scenes: brightness, light mode, colours and Cycle in one tap** | – | – | ✓ | **–** |
+| **Sleep fade to dark, then off** | – | – | ✓ | **–** |
+| **Palettes from a photo or a colour harmony** | – | – | ✓ | **–** |
 | Volume and mute, battery, active inputs | ✓ | ✓ | battery | ✓ |
 | Sound profiles (per-model names, e.g. Bass+ / Outdoor / Indoor) | ✓ | ✓ (RPC) | – | ✓ |
 | Custom 6-band EQ, saved presets | ✓ | ✓ (RPC) | – | ✓ |
@@ -70,9 +74,16 @@ Every release is signed with the same key, so a newer APK installs over the old 
 
 <sub>**Bold rows** (at the top) are only in Boks Remote; the last column compares with the official SOUNDBOKS app. **RPC:** on these models the feature goes through the protobuf command channel of newer firmware. **approx.:** this model's EQ bands haven't been [measured](#help-measure-your-speaker) yet, so room tuning uses the Mix's. **firmware ≥ 3:** older Gen 3 firmware has no command channel for the pincode, so it has to be entered in the official app.</sub>
 
-- **Custom EQ:** drag six bands (±10 dB), hear the change live, and save curves on the phone.
-- **Room tuning:** measure at a few listening spots with the phone or a USB microphone and get a suggested EQ.
-- **Cycle:** pick palettes for the Lightboks, put them in order (or shuffle them) and change every 30 s to 30 min, also with the screen off. Picking a palette by hand pauses it.
+- **Custom EQ:** drag six bands (±10 dB), hear it live, and save curves on the phone.
+- **Room tuning:** measure a few listening spots with the phone or a USB microphone and get a suggested EQ.
+- **Cycle:** rotate the Lightboks through chosen palettes every 30 s to 30 min, in order or shuffled, with the screen off too. Pause, Skip, or tap a palette to jump to it.
+- **Palette editor:** sliders, colour codes and recent colours, with a live preview on the light.
+- **Colour harmonies:** build all four colours from one: Analogous, Complement, Split, Triadic, Square or Mono.
+- **Palette from a photo:** its most vivid colours become the palette.
+- **Scenes:** brightness, light mode, palette and Cycle back with one tap. The scene in use saves your changes by itself.
+- **Sleep fade:** dim to dark over 15, 30 or 60 minutes, then switch off.
+- **Effects pad:** hold an effect or slide up to lock it. **Drop** blacks out while held and strobes on release.
+- **Quick Settings tile** for Cycle, and a Stop notification while anything runs with the screen off.
 
 Firmware updates, registration and anti-theft lock need SOUNDBOKS's servers, so they stay in the official app. Saved EQs stay on the phone rather than syncing to a SOUNDBOKS account.
 
@@ -97,18 +108,22 @@ A local release build is signed with the debug key, so it can be sideloaded as-i
 
 ## Privacy
 
-Boks Remote has no account, analytics or cloud connection. Owner pincodes, palettes and EQs stay on the phone and are excluded from Android backups.
+Boks Remote has no account, analytics or cloud connection. Owner pincodes, palettes, scenes and EQs stay on the phone and are excluded from Android backups.
 
 | Permission | Used for |
 | --- | --- |
 | Nearby devices (Bluetooth scan and connect) | Finding and controlling speakers. The scan is declared as not used for location, so no location permission is asked for. |
 | Microphone | Room tuning only, while a measurement runs. |
-| Notifications | The DMX bridge's status notification with its Stop action. |
-| Network, Wi-Fi multicast, foreground service, wake lock | Receiving Art-Net/sACN for the DMX bridge and keeping it running with the screen off. |
+| Notifications | The status notification with its Stop action while the DMX bridge, Cycle or Sleep fade runs. |
+| Network, Wi-Fi multicast, foreground service, wake lock | Receiving Art-Net/sACN for the DMX bridge, and keeping it, Cycle and Sleep fade running with the screen off. |
 
 ## Status
 
 Tested on hardware with a SOUNDBOKS Mix (firmware 1.1.1) and a Lightboks (firmware 1.1.0). Not every model and firmware has been tried, so if something doesn't respond, run `adb logcat -s SpeakerController GattConnection` and open an issue with the log and your speaker model and firmware.
+
+## Known issues
+
+- **Lightboks keeps the previous palette:** now and then, a palette you pick doesn't show on the Lightboks, which stays on the one before even though the app shows the new one. Switching the light mode (Chill, Dance, Rave or Uplight) makes it show the palette you picked.
 
 ## License
 
