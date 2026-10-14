@@ -122,7 +122,7 @@ fun SpeakerScreen(speaker: SpeakerController, app: BoksApp, onBack: () -> Unit) 
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         topBar = {
             TopAppBar(
-                title = { Text(s.name ?: s.model?.label ?: s.kind.replaceFirstChar(Char::uppercase), maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                title = { Text(shownName(s.name) ?: s.model?.label ?: s.kind.replaceFirstChar(Char::uppercase), maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back to device list") } },
                 actions = {
                     if (s.rpcAvailable && connected) {
@@ -155,7 +155,7 @@ fun SpeakerScreen(speaker: SpeakerController, app: BoksApp, onBack: () -> Unit) 
                     ConnectionState.CONNECTING -> StatusPanel {
                         CircularProgressIndicator()
                         Spacer(Modifier.height(24.dp))
-                        Text("Connecting to ${s.name ?: s.model?.label ?: "the ${s.kind}"}…", style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center)
+                        Text("Connecting to ${shownName(s.name) ?: s.model?.label ?: "the ${s.kind}"}…", style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center)
                         Spacer(Modifier.height(8.dp))
                         Text("Keep the phone close to the ${s.kind}.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         Spacer(Modifier.height(24.dp))
@@ -199,7 +199,7 @@ fun SpeakerScreen(speaker: SpeakerController, app: BoksApp, onBack: () -> Unit) 
         AlertDialog(
             onDismissRequest = { confirmPowerOff = false },
             icon = { Icon(Icons.Default.PowerSettingsNew, contentDescription = null) },
-            title = { Text("Power off ${s.name ?: "the ${s.kind}"}?") },
+            title = { Text("Power off ${shownName(s.name) ?: "the ${s.kind}"}?") },
             text = {
                 Text(
                     if (s.rpcAvailable) "You'll need to switch it on at the ${s.kind} again. Restart turns it back on by itself."

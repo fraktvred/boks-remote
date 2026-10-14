@@ -14,6 +14,10 @@ android {
         targetSdk = 36
         versionCode = 1
         versionName = "0.1.0"
+        // Stand-in device names for README screenshots, e.g. "<team ID>=Backyard Mix;<team ID>=Stage light",
+        // so the shots don't show anyone's team ID. Set by tools/screenshots.sh; empty otherwise.
+        val screenshotNames = (findProperty("boksremote.screenshotNames") as String?).orEmpty()
+        buildConfigField("String", "SCREENSHOT_NAMES", "\"${screenshotNames.replace("\\", "\\\\").replace("\"", "\\\"")}\"")
     }
 
     // Published builds are signed with a fixed key so they update in place. It comes from the
@@ -42,7 +46,10 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    buildFeatures { compose = true }
+    buildFeatures {
+        compose = true
+        buildConfig = true
+    }
 }
 
 kotlin { jvmToolchain(17) }

@@ -308,7 +308,7 @@ internal fun RoomCorrectionWizard(
                             CheckItem(
                                 done = bluetooth,
                                 icon = Icons.Default.Bluetooth,
-                                title = "Phone audio plays on ${s.name ?: "the speaker"}",
+                                title = "Phone audio plays on ${shownName(s.name) ?: "the speaker"}",
                                 text = when {
                                     bluetooth -> "Connected over Bluetooth."
                                     externalMics.isNotEmpty() -> "The tones come from the phone, so connect it to the speaker over Bluetooth for audio. If your microphone has a headphone output, the phone may be playing there instead."

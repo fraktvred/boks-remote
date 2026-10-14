@@ -182,7 +182,7 @@ private fun DeviceRow(ad: Advertisement, modifier: Modifier, onClick: () -> Unit
             DeviceBadge(ad.family, size = 56.dp)
             Spacer(Modifier.width(16.dp))
             Column(Modifier.weight(1f)) {
-                Text(ad.name ?: ad.model?.label ?: "SOUNDBOKS device", style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(shownName(ad.name) ?: ad.model?.label ?: "SOUNDBOKS device", style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 val details = listOfNotNull(ad.model?.label?.takeIf { it != ad.name }, ad.firmware?.let { "Firmware $it" })
                 if (details.isNotEmpty()) {
                     Text(
