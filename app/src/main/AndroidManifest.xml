@@ -9,7 +9,7 @@
         android:usesPermissionFlags="neverForLocation" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
 
-    <!-- DMX bridge: receive Art-Net/sACN over Wi-Fi and keep running with the screen off. -->
+    <!-- DMX bridge and Cycle: receive Art-Net/sACN over Wi-Fi and keep running with the screen off. -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
@@ -38,7 +38,7 @@
             </intent-filter>
         </activity>
         <service
-            android:name=".dmx.DmxBridgeService"
+            android:name=".LightSessionService"
             android:exported="false"
             android:foregroundServiceType="connectedDevice" />
     </application>

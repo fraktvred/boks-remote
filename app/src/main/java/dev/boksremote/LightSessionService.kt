@@ -1,4 +1,4 @@
-package dev.boksremote.dmx
+package dev.boksremote
 
 import android.app.Notification
 import android.app.NotificationChannel
@@ -8,19 +8,22 @@ import android.app.Service
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.IBinder
-import dev.boksremote.BoksApp
-import dev.boksremote.MainActivity
+import dev.boksremote.dmx.DmxConfig
+import dev.boksremote.dmx.DmxStatus
+import dev.boksremote.speaker.CycleConfig
+import dev.boksremote.speaker.CycleStatus
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 
 /**
- * Keeps the process in the foreground while the DMX bridge runs, so Android doesn't stop the
- * network receiver or Bluetooth link when the screen is off. All bridge logic lives in [DmxBridge];
- * the notification only mirrors its state, so a show can be checked from the lock screen.
+ * Keeps the process in the foreground while something drives the light from the background (the DMX
+ * bridge or Cycle), so Android doesn't stop the network receiver, the timer or the Bluetooth link when
+ * the screen is off. [BoksApp] starts and stops it; the notification only mirrors their state, so a
+ * show can be checked from the lock screen.
  */
-class DmxBridgeService : Service() {
+class LightSessionService : Service() {
     private var updates: Job? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -29,20 +32,22 @@ class DmxBridgeService : Service() {
         val app = application as BoksApp
         if (intent?.action == ACTION_STOP) {
             app.stopBridge()
+            app.cycle.stop()
             return START_NOT_STICKY
         }
         val nm = getSystemService(NotificationManager::class.java)
-        nm.createNotificationChannel(NotificationChannel(CHANNEL, "DMX bridge", NotificationManager.IMPORTANCE_LOW))
-        startForeground(NOTIFICATION_ID, build("Starting…"), ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE)
+        // Keeps the channel id of the DMX-only days, so a user's notification settings for it carry over.
+        nm.createNotificationChannel(NotificationChannel(CHANNEL, "Lightboks running", NotificationManager.IMPORTANCE_LOW))
+        startForeground(NOTIFICATION_ID, build(Summary("Lightboks", "Starting…")), ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE)
         updates?.cancel()
         updates = app.scope.launch {
             // Only distinct summaries are posted, so the packet rate ticking doesn't re-notify every second.
-            combine(app.bridge.status, app.dmxConfig) { s, c -> summary(s, c) }
+            combine(app.bridge.status, app.dmxConfig, app.cycle.status, app.cycle.config, ::summary)
                 .distinctUntilChanged()
                 // A post after stop would leave a stale, non-foreground notification behind.
-                .collect { if (app.bridge.status.value.running) nm.notify(NOTIFICATION_ID, build(it)) }
+                .collect { if (it != null) nm.notify(NOTIFICATION_ID, build(it)) }
         }
-        // If Android kills the process, the bridge state is gone too; don't restart an empty service.
+        // If Android kills the process, the session state is gone too; don't restart an empty service.
         return START_NOT_STICKY
     }
 
@@ -51,13 +56,13 @@ class DmxBridgeService : Service() {
         super.onDestroy()
     }
 
-    private fun build(text: String): Notification {
+    private fun build(s: Summary): Notification {
         val open = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
-        val stop = PendingIntent.getService(this, 1, Intent(this, DmxBridgeService::class.java).setAction(ACTION_STOP), PendingIntent.FLAG_IMMUTABLE)
+        val stop = PendingIntent.getService(this, 1, Intent(this, LightSessionService::class.java).setAction(ACTION_STOP), PendingIntent.FLAG_IMMUTABLE)
         return Notification.Builder(this, CHANNEL)
             .setSmallIcon(android.R.drawable.stat_sys_data_bluetooth)
-            .setContentTitle("DMX bridge running")
-            .setContentText(text)
+            .setContentTitle(s.title)
+            .setContentText(s.text)
             .setContentIntent(open)
             .addAction(Notification.Action.Builder(null, "Stop", stop).build())
             .setOngoing(true)
@@ -65,12 +70,21 @@ class DmxBridgeService : Service() {
             .build()
     }
 
+    data class Summary(val title: String, val text: String)
+
     companion object {
         private const val CHANNEL = "dmx-bridge"
         private const val NOTIFICATION_ID = 1
-        private const val ACTION_STOP = "dev.boksremote.STOP_BRIDGE"
+        private const val ACTION_STOP = "dev.boksremote.STOP_LIGHT_SESSION"
 
-        fun summary(s: DmxStatus, c: DmxConfig): String = when {
+        /** The bridge takes the notification while it runs, since Cycle is paused meanwhile; null when neither runs. */
+        fun summary(bridge: DmxStatus, dmx: DmxConfig, cycle: CycleStatus, cycleConfig: CycleConfig): Summary? = when {
+            bridge.running -> Summary("DMX bridge running", bridgeSummary(bridge, dmx))
+            cycle.running -> Summary("Cycling palettes", "${cycle.current} · changes every ${CycleConfig.intervalLabel(cycleConfig.intervalSeconds)}")
+            else -> null
+        }
+
+        fun bridgeSummary(s: DmxStatus, c: DmxConfig): String = when {
             s.networkError != null -> s.networkError
             s.reconnecting -> "Light disconnected, reconnecting…"
             s.packetsPerSecond > 0 -> "Receiving ${c.protocol.label} universe ${c.universe} from ${s.source ?: "the network"}"

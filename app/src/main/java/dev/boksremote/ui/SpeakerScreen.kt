@@ -25,6 +25,7 @@ import androidx.compose.material.icons.automirrored.filled.VolumeDown
 import androidx.compose.material.icons.automirrored.filled.VolumeMute
 import androidx.compose.material.icons.automirrored.filled.VolumeOff
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
+import androidx.compose.material.icons.filled.Autorenew
 import androidx.compose.material.icons.filled.Battery0Bar
 import androidx.compose.material.icons.filled.Battery2Bar
 import androidx.compose.material.icons.filled.Battery4Bar
@@ -220,6 +221,7 @@ fun SpeakerScreen(speaker: SpeakerController, app: BoksApp, onBack: () -> Unit) 
 @Composable
 private fun Controls(s: SpeakerState, speaker: SpeakerController, app: BoksApp) {
     val bridge by app.bridge.status.collectAsState()
+    val cycle by app.cycle.status.collectAsState()
     DeviceHeader(s)
     if (s.locked) {
         Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
@@ -260,7 +262,8 @@ private fun Controls(s: SpeakerState, speaker: SpeakerController, app: BoksApp) 
         SectionCard("Light mode", Icons.Default.Lightbulb) { Choice(EnergyLevel.entries, level, { it.label }, speaker::setEnergyLevel) }
     }
     if (s.family == Family.LIGHT && s.rpcAvailable) {
-        SectionCard("Colours", Icons.Default.Palette) { PaletteSection(s, speaker, app.palettes) }
+        SectionCard("Colours", Icons.Default.Palette) { PaletteSection(s, speaker, app.palettes, app.cycle) }
+        SectionCard("Cycle", Icons.Default.Autorenew, trailing = { if (cycle.running) LiveBadge(receiving = true) }) { CycleSection(app, speaker) }
         SectionCard("Effects", Icons.Default.Whatshot, trailing = { HintText("Hold to play") }) { FxPad(speaker) }
         SectionCard("DMX bridge", Icons.Default.SettingsInputAntenna, trailing = { if (bridge.running) LiveBadge(receiving = bridge.packetsPerSecond > 0) }) {
             DmxSection(app)
@@ -342,8 +345,8 @@ private fun Pill(icon: ImageVector?, text: String) {
 }
 
 @Composable
-internal fun HintText(text: String) {
-    Text(text, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+internal fun HintText(text: String, modifier: Modifier = Modifier) {
+    Text(text, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = modifier)
 }
 
 /** The DMX controls are hidden while the light is away, so the running bridge stays visible and stoppable here. */

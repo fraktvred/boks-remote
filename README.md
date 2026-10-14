@@ -57,6 +57,7 @@ Every release is signed with the same key, so a newer APK installs over the old 
 |---|---|---|---|---|
 | **Room tuning by microphone** | approx. | Mix; others approx. | – | **–** |
 | **DMX bridge (Art-Net / sACN)** | – | – | ✓ | **–** |
+| **Cycle: rotate through chosen palettes on a timer** | – | – | ✓ | **–** |
 | Volume and mute, battery, active inputs | ✓ | ✓ | battery | ✓ |
 | Sound profiles (per-model names, e.g. Bass+ / Outdoor / Indoor) | ✓ | ✓ (RPC) | – | ✓ |
 | Custom 6-band EQ, saved presets | ✓ | ✓ (RPC) | – | ✓ |
@@ -71,6 +72,7 @@ Every release is signed with the same key, so a newer APK installs over the old 
 
 - **Custom EQ:** drag six bands (±10 dB), hear the change live, and save curves on the phone.
 - **Room tuning:** measure at a few listening spots with the phone or a USB microphone and get a suggested EQ.
+- **Cycle:** pick palettes for the Lightboks, put them in order (or shuffle them) and change every 30 s to 30 min, also with the screen off. Picking a palette by hand pauses it.
 
 Firmware updates, registration and anti-theft lock need SOUNDBOKS's servers, so they stay in the official app. Saved EQs stay on the phone rather than syncing to a SOUNDBOKS account.
 

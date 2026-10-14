@@ -1,6 +1,5 @@
 package dev.boksremote
 
-import dev.boksremote.dmx.DmxBridgeService
 import dev.boksremote.dmx.DmxConfig
 import dev.boksremote.dmx.DmxFrame
 import dev.boksremote.dmx.DmxPackets
@@ -153,9 +152,9 @@ class DmxTest {
     fun notificationSummaryPrioritisesProblems() {
         val c = DmxConfig(DmxProtocol.SACN, universe = 3)
         val ok = DmxStatus(running = true, addresses = listOf("192.168.1.23"))
-        assertEquals("Waiting for sACN universe 3 on 192.168.1.23", DmxBridgeService.summary(ok, c))
-        assertEquals("Receiving sACN universe 3 from 192.168.1.5", DmxBridgeService.summary(ok.copy(packetsPerSecond = 40, source = "192.168.1.5"), c))
-        assertEquals("Light disconnected, reconnecting…", DmxBridgeService.summary(ok.copy(packetsPerSecond = 40, reconnecting = true), c))
-        assertTrue(DmxBridgeService.summary(ok.copy(addresses = emptyList()), c).startsWith("No Wi-Fi"))
+        assertEquals("Waiting for sACN universe 3 on 192.168.1.23", LightSessionService.bridgeSummary(ok, c))
+        assertEquals("Receiving sACN universe 3 from 192.168.1.5", LightSessionService.bridgeSummary(ok.copy(packetsPerSecond = 40, source = "192.168.1.5"), c))
+        assertEquals("Light disconnected, reconnecting…", LightSessionService.bridgeSummary(ok.copy(packetsPerSecond = 40, reconnecting = true), c))
+        assertTrue(LightSessionService.bridgeSummary(ok.copy(addresses = emptyList()), c).startsWith("No Wi-Fi"))
     }
 }

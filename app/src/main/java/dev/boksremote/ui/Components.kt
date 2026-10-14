@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Card
@@ -72,6 +73,12 @@ internal fun SectionCard(
         }
     }
 }
+
+/**
+ * For a [androidx.compose.material3.ModalBottomSheet]: a tall sheet otherwise expands up under the
+ * status bar, so this keeps it below it with a gap that shows the screen behind.
+ */
+internal fun Modifier.sheetTopMargin() = statusBarsPadding().padding(top = 16.dp)
 
 /** A small label above a control inside a [SectionCard]. */
 @Composable
