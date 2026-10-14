@@ -83,7 +83,6 @@ import dev.boksremote.BoksApp
 import dev.boksremote.protocol.Family
 import dev.boksremote.speaker.ConnectionState
 import dev.boksremote.speaker.EnergyLevel
-import dev.boksremote.speaker.EqMode
 import dev.boksremote.speaker.SpeakerController
 import dev.boksremote.speaker.SpeakerState
 import dev.boksremote.speaker.StereoRole
@@ -246,10 +245,7 @@ private fun Controls(s: SpeakerState, speaker: SpeakerController, app: BoksApp) 
         }
     }
     if (s.eq != null || (s.family == Family.BIFROST && s.rpcAvailable)) {
-        // Custom EQ needs band data the app doesn't edit, so only the presets are offered.
-        SectionCard("Sound profile", Icons.Default.Equalizer) {
-            Choice(listOf(EqMode.DEFAULT, EqMode.LOUD, EqMode.QUIET), s.eq, { it.label }, speaker::setEq)
-        }
+        SectionCard("Sound profiles & EQ", Icons.Default.Equalizer) { EqSection(s, speaker, app.eqPresets) }
     }
     if (s.teamUp != null || s.stereoRole != null) {
         SectionCard("Team-up", Icons.Default.Groups) {

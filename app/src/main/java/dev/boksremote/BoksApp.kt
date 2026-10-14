@@ -8,6 +8,7 @@ import dev.boksremote.dmx.DmxBridgeService
 import dev.boksremote.dmx.DmxConfig
 import dev.boksremote.dmx.DmxConfigStore
 import dev.boksremote.protocol.Advertisement
+import dev.boksremote.speaker.EqPresetStore
 import dev.boksremote.speaker.PaletteStore
 import dev.boksremote.speaker.PincodeStore
 import dev.boksremote.speaker.SpeakerController
@@ -27,6 +28,7 @@ class BoksApp : Application() {
     val scanner by lazy { Scanner(this) }
     private val pincodes by lazy { PincodeStore(this) }
     val palettes by lazy { PaletteStore(this) }
+    val eqPresets by lazy { EqPresetStore(this) }
     val bridge by lazy { DmxBridge(this, scope) }
     private val dmxConfigStore by lazy { DmxConfigStore(this) }
 

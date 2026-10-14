@@ -28,12 +28,16 @@ import java.util.UUID
 enum class ConnectionState { CONNECTING, CONNECTED, DISCONNECTED, FAILED }
 enum class TeamUpMode(val label: String) { SOLO("Solo"), HOST("Host"), JOIN("Join") }
 enum class StereoRole(val label: String) { MONO("Mono"), LEFT("Left"), RIGHT("Right") }
-enum class EqMode(val label: String) { DEFAULT("Default"), LOUD("Loud"), QUIET("Quiet"), USER("Custom") }
+/** EQ mode by wire value. What the presets are called depends on the model; see [SoundProfiles]. */
+enum class EqMode { DEFAULT, LOUD, QUIET, USER }
 /**
  * Lightboks energy level, by wire value. CUSTOM is a status, not a writable mode: the light
  * reports it while a custom program runs. The official app labels the program it ships as "Uplight".
  */
 enum class EnergyLevel(val label: String) { LOW("Chill"), MEDIUM("Dance"), HIGH("Rave"), CUSTOM("Uplight") }
+
+/** A queued EQ change: a built-in [mode], or the user curve when [bands] is set. */
+private class EqWrite(val mode: EqMode, val bands: List<Int>?)
 
 /** Snapshot of everything the UI shows. Null means "not supported or not read yet". */
 data class SpeakerState(
@@ -47,6 +51,7 @@ data class SpeakerState(
     val stereoRole: StereoRole? = null,
     val teamUp: TeamUpMode? = null,
     val eq: EqMode? = null,
+    val eqBands: List<Int>? = null, // custom curve in dB, see EqCurve; kept while a preset plays
     val activeInputs: List<String> = emptyList(),
     val brightness: Int? = null, // 0..255
     val energyLevel: EnergyLevel? = null,
@@ -80,6 +85,8 @@ class SpeakerController(
     private val volumeWrites = Channel<Int>(Channel.CONFLATED)
     private val brightnessWrites = Channel<Int>(Channel.CONFLATED)
     private val fxWrites = Channel<UUID>(Channel.CONFLATED)
+    // Presets and curves share one queue so a late curve from a drag can never override a newer preset.
+    private val eqWrites = Channel<EqWrite>(Channel.CONFLATED)
     private val jobs = mutableListOf<Job>()
 
     private val family get() = _state.value.family
@@ -115,6 +122,7 @@ class SpeakerController(
             for (id in fxWrites) attempt("effect") { applyFx(id) }
         }
         jobs += scope.launch { for (v in brightnessWrites) attempt("brightness") { applyBrightness(v) } }
+        jobs += scope.launch { for (w in eqWrites) attempt("EQ") { if (w.bands != null) writeCustomEq(w.bands) else writeEqMode(w.mode) } }
     }
 
     /** Connects again and waits for the outcome; for callers that keep the link alive (the DMX bridge). */
@@ -198,7 +206,7 @@ class SpeakerController(
                 readString(Uuids.LEGACY_FIRMWARE)?.let { s -> _state.update { it.copy(firmware = s) } }
                 readByte(Uuids.LEGACY_VOLUME)?.let { b -> _state.update { it.copy(volume = b) } }
                 readByte(Uuids.LEGACY_STEREO_ROLE)?.let { b -> _state.update { it.copy(stereoRole = StereoRole.entries.getOrNull(b)) } }
-                readByte(Uuids.LEGACY_EQ_MODE)?.let { b -> _state.update { it.copy(eq = EqMode.entries.getOrNull(b)) } }
+                readLegacyEq()
                 readByte(Uuids.LEGACY_SOUND_STATUS)?.let { b -> _state.update { it.copy(activeInputs = legacyInputs(b)) } }
                 readString(Uuids.LEGACY_SKAA_MODE)?.let { s -> _state.update { it.copy(teamUp = skaaMode(s)) } }
             }
@@ -236,6 +244,10 @@ class SpeakerController(
         }
         if (family == Family.BIFROST) {
             attemptQuietly { rpc.call("AudioControlService", "GetEqMode").int(1).let { e -> _state.update { it.copy(eq = EqMode.entries.getOrNull(e)) } } }
+            attemptQuietly {
+                val bands = rpc.call("AudioControlService", "GetEqBands").bytes(2)
+                _state.update { it.copy(eqBands = EqCurve.fromWire(bands)) }
+            }
         }
     }
 
@@ -404,13 +416,45 @@ class SpeakerController(
         _state.update { it.copy(teamUp = mode) }
     }
 
-    fun setEq(mode: EqMode) = control("EQ") {
+    /** Switches to a built-in profile; the speaker keeps its custom curve for later. */
+    fun setEq(mode: EqMode) {
+        _state.update { it.copy(eq = mode) }
+        eqWrites.trySend(EqWrite(mode, null))
+    }
+
+    /** Plays [bandsDb] as the user-defined EQ. Streams while dragging; only the latest curve is sent. */
+    fun setCustomEq(bandsDb: List<Int>) {
+        _state.update { it.copy(eq = EqMode.USER, eqBands = bandsDb) }
+        eqWrites.trySend(EqWrite(EqMode.USER, bandsDb))
+    }
+
+    private suspend fun writeEqMode(mode: EqMode) {
         if (family == Family.LEGACY) {
             gatt.write(Uuids.LEGACY_EQ_MODE, byteArrayOf(mode.ordinal.toByte()))
         } else {
             requireRpc().call("AudioControlService", "SetEqMode", proto { int32(1, mode.ordinal) })
         }
-        _state.update { it.copy(eq = mode) }
+    }
+
+    private suspend fun writeCustomEq(bandsDb: List<Int>) {
+        val wire = EqCurve.toWire(bandsDb)
+        if (family == Family.LEGACY) {
+            gatt.write(Uuids.LEGACY_EQ_MODE, byteArrayOf(EqMode.USER.ordinal.toByte()) + wire)
+        } else {
+            // Same order as the official app: switch to the user curve, then load its bands.
+            val rpc = requireRpc()
+            rpc.call("AudioControlService", "SetEqMode", proto { int32(1, EqMode.USER.ordinal) })
+            rpc.call("AudioControlService", "SetEqBands", proto { uint32(1, EqCurve.BANDS); bytes(2, wire) })
+        }
+    }
+
+    /** Legacy EQ characteristic: mode byte, followed by the bands when the mode is user-defined. */
+    private suspend fun readLegacyEq() {
+        if (!gatt.hasCharacteristic(Uuids.LEGACY_EQ_MODE)) return
+        val raw = try { gatt.read(Uuids.LEGACY_EQ_MODE) } catch (e: Exception) { Log.d(TAG, "read EQ: ${e.message}"); return }
+        val mode = raw.firstOrNull()?.toInt()?.and(0xFF)?.let { EqMode.entries.getOrNull(it) }
+        val bands = if (mode == EqMode.USER) EqCurve.fromWire(raw.copyOfRange(1, raw.size)) else null
+        _state.update { it.copy(eq = mode, eqBands = bands) }
     }
 
     fun setName(name: String) = control("name") {
