@@ -13,11 +13,15 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlin.random.Random
 
+/** How Cycle goes from one palette to the next. */
+enum class CycleTransition(val label: String) { INSTANT("Instant"), FADE("Fade") }
+
 /** Which palettes Cycle plays, by name and in the user's order, and how. */
 data class CycleConfig(
     val names: List<String> = DEFAULT_NAMES,
     val intervalSeconds: Int = 60,
     val shuffle: Boolean = false,
+    val transition: CycleTransition = CycleTransition.FADE,
 ) {
     companion object {
         /** No shorter than 30 s: each palette the light gets may be written to its flash (see DmxBridge). */
@@ -91,6 +95,8 @@ class PaletteCycle(context: Context, private val scope: CoroutineScope, private 
     private val order = CycleOrder()
     private var job: Job? = null
     private var light: SpeakerController? = null
+    /** The palette a fade is on its way to, while it is; stopping Cycle mid-fade lands on it rather than in between. */
+    private var fadingTo: LightPalette? = null
     // The interval is minutes long; without a wake lock a dozing phone would let the timer slip.
     private val wakeLock = context.getSystemService(PowerManager::class.java)
         .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "BoksRemote:cycle")
@@ -194,7 +200,7 @@ class PaletteCycle(context: Context, private val scope: CoroutineScope, private 
     fun hold() {
         val s = _status.value
         if (!s.running) return
-        halt()
+        halt(finishFade = true)
         _status.value = s.copy(running = false, paused = true, remainingMs = (s.nextAt - SystemClock.elapsedRealtime()).coerceAtLeast(0))
     }
 
@@ -207,13 +213,16 @@ class PaletteCycle(context: Context, private val scope: CoroutineScope, private 
     }
 
     fun stop() {
-        halt()
+        halt(finishFade = true)
         _status.value = CycleStatus()
     }
 
-    private fun halt() {
+    /** [finishFade]: a fade cut short puts its end palette on the light; otherwise something else is about to. */
+    private fun halt(finishFade: Boolean = false) {
         job?.cancel()
         job = null
+        fadingTo?.let { if (finishFade) light?.setPalette(it) }
+        fadingTo = null
         if (wakeLock.isHeld) wakeLock.release()
     }
 
@@ -221,6 +230,8 @@ class PaletteCycle(context: Context, private val scope: CoroutineScope, private 
     private fun run(advance: Boolean, resumeAt: String? = null, firstDelayMs: Long? = null) {
         val light = light ?: return
         job?.cancel()
+        // A Skip mid-fade fades on from wherever the light got to.
+        fadingTo = null
         job = scope.launch {
             var change = advance
             var resume = resumeAt
@@ -237,26 +248,38 @@ class PaletteCycle(context: Context, private val scope: CoroutineScope, private 
                     light.setPalette(list.first { it.name == resume })
                     resume
                 } else if (change || st.current !in names) {
-                    val pick = st.next?.takeIf { it in names && it != st.current } ?: order.pick(names, cfg.shuffle, st.current)!!
-                    // While the light is reconnecting the change waits for it rather than failing every interval.
-                    light.state.first { it.connection == ConnectionState.CONNECTED }
-                    order.played(pick, names)
-                    light.setPalette(list.first { it.name == pick })
-                    pick
+                    st.next?.takeIf { it in names && it != st.current } ?: order.pick(names, cfg.shuffle, st.current)!!
                 } else st.current!!
+                // The palette to put on the light when this round changes it; a resumed one is on already.
+                val changeTo = if (now != resume && (change || st.current !in names)) list.first { it.name == now } else null
                 resume = null
                 val interval = firstDelay?.coerceIn(0, cfg.intervalSeconds * 1000L) ?: (cfg.intervalSeconds * 1000L)
                 firstDelay = null
+                if (changeTo != null) {
+                    // While the light is reconnecting the change waits for it rather than failing every interval.
+                    light.state.first { it.connection == ConnectionState.CONNECTED }
+                    order.played(now, names)
+                }
+                val nextAt = SystemClock.elapsedRealtime() + interval
                 // Times out by itself if this loop ever stops without releasing it.
                 wakeLock.acquire(interval + WAKE_MARGIN_MS)
+                // The new palette counts from the moment its fade begins, so a fade doesn't stretch the interval.
                 _status.value = CycleStatus(
                     running = true,
                     current = now,
                     showing = true,
                     next = order.pick(names, cfg.shuffle, now),
-                    nextAt = SystemClock.elapsedRealtime() + interval,
+                    nextAt = nextAt,
                 )
-                delay(interval)
+                if (changeTo != null) {
+                    val from = light.state.value.let { s -> s.palette?.takeUnless { s.paletteIsDefault } }
+                    if (cfg.transition == CycleTransition.FADE && from != null && from.colors != changeTo.colors) {
+                        fadingTo = changeTo
+                        light.fadePalette(from, changeTo, FADE_MS)
+                        fadingTo = null
+                    } else light.setPalette(changeTo)
+                }
+                delay((nextAt - SystemClock.elapsedRealtime()).coerceAtLeast(0))
                 change = true
             }
         }
@@ -268,6 +291,7 @@ class PaletteCycle(context: Context, private val scope: CoroutineScope, private 
             .putString(KEY_NAMES, config.names.joinToString("\n"))
             .putInt(KEY_INTERVAL, config.intervalSeconds)
             .putBoolean(KEY_SHUFFLE, config.shuffle)
+            .putString(KEY_TRANSITION, config.transition.name)
             .apply()
     }
 
@@ -280,13 +304,17 @@ class PaletteCycle(context: Context, private val scope: CoroutineScope, private 
         val default = CycleConfig()
         val names = prefs.getString(KEY_NAMES, null)?.split('\n')?.filter { it.isNotBlank() } ?: default.names
         val interval = prefs.getInt(KEY_INTERVAL, default.intervalSeconds).takeIf { it in CycleConfig.INTERVALS } ?: default.intervalSeconds
-        return CycleConfig(names, interval, prefs.getBoolean(KEY_SHUFFLE, default.shuffle))
+        val transition = CycleTransition.entries.firstOrNull { it.name == prefs.getString(KEY_TRANSITION, null) } ?: default.transition
+        return CycleConfig(names, interval, prefs.getBoolean(KEY_SHUFFLE, default.shuffle), transition)
     }
 
     private companion object {
         const val KEY_NAMES = "names"
         const val KEY_INTERVAL = "interval"
         const val KEY_SHUFFLE = "shuffle"
+        const val KEY_TRANSITION = "transition"
+        /** Long enough to read as a fade, short against the shortest interval. */
+        const val FADE_MS = 3_000L
         const val WAKE_MARGIN_MS = 30_000L
     }
 }

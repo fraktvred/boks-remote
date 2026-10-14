@@ -84,6 +84,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import dev.boksremote.BoksApp
 import dev.boksremote.speaker.CycleConfig
+import dev.boksremote.speaker.CycleTransition
 import dev.boksremote.speaker.LightPalette
 import dev.boksremote.speaker.SpeakerController
 import kotlinx.coroutines.delay
@@ -255,6 +256,16 @@ private fun CycleEditorSheet(
                                 selected = config.intervalSeconds == s,
                                 onClick = { onChange(config.copy(intervalSeconds = s)) },
                                 label = { Text(CycleConfig.intervalLabel(s)) },
+                            )
+                        }
+                    }
+                    ControlLabel("Transition")
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        CycleTransition.entries.forEach { t ->
+                            FilterChip(
+                                selected = config.transition == t,
+                                onClick = { onChange(config.copy(transition = t)) },
+                                label = { Text(t.label) },
                             )
                         }
                     }

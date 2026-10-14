@@ -67,29 +67,30 @@ class SceneStore(context: Context) {
 
 /**
  * One scene per line, in fields split by `|`:
- * `name|brightness|level|palette name|h,s,v|h,s,v|h,s,v|h,s,v|interval|shuffle|cycle names|running|current|ms left`.
+ * `name|brightness|level|palette name|h,s,v|h,s,v|h,s,v|h,s,v|interval|shuffle|cycle names|running|current|ms left|transition`.
  * The palette fields are empty for the default colours and the cycle fields when there is no cycle, as
  * are current and ms left when unknown. Cycle names are split by [NAME_SEPARATOR], since palette names
  * may hold anything but `|` and newlines. Earlier lines still read: 3 or 8 fields without a cycle, 11
- * with one saved only while it ran, and 12 without where it was.
+ * with one saved only while it ran, 12 without where it was, and 14 without the transition, which
+ * takes the default.
  */
 object SceneCodec {
     private const val NAME_SEPARATOR = '\u001F'
-    private const val FIELDS = 14
+    private const val FIELDS = 15
 
     fun encode(list: List<Scene>): String = list.joinToString("\n") { s ->
         val palette = s.palette?.let { PaletteCodec.encode(listOf(it)) } ?: "|".repeat(LightPalette.SIZE)
         val cycle = s.cycle?.let { c ->
             val cfg = c.config
-            "${cfg.intervalSeconds}|${cfg.shuffle}|${cfg.names.joinToString(NAME_SEPARATOR.toString())}|${c.running}|${c.current.orEmpty()}|${c.remainingMs ?: ""}"
-        } ?: "|||||"
+            "${cfg.intervalSeconds}|${cfg.shuffle}|${cfg.names.joinToString(NAME_SEPARATOR.toString())}|${c.running}|${c.current.orEmpty()}|${c.remainingMs ?: ""}|${cfg.transition.name}"
+        } ?: "||||||"
         "${PaletteCodec.sanitize(s.name)}|${s.brightness}|${s.level.name}|$palette|$cycle"
     }
 
     /** Skips malformed lines. */
     fun decode(text: String): List<Scene> = text.lineSequence().mapNotNull { line ->
         val parts = line.split('|')
-        if (parts.size !in setOf(3, 8, 11, 12, FIELDS) || parts[0].isBlank()) return@mapNotNull null
+        if (parts.size !in setOf(3, 8, 11, 12, 14, FIELDS) || parts[0].isBlank()) return@mapNotNull null
         val brightness = parts[1].toIntOrNull()?.takeIf { it in 0..255 } ?: return@mapNotNull null
         val level = EnergyLevel.entries.firstOrNull { it.name == parts[2] } ?: return@mapNotNull null
         val palette = if (parts.size > 3 && parts[3].isNotEmpty()) {
@@ -97,7 +98,8 @@ object SceneCodec {
         } else null
         val cycle = if (parts.size >= 11 && parts[8].isNotEmpty()) {
             val interval = parts[8].toIntOrNull()?.takeIf { it in CycleConfig.INTERVALS } ?: return@mapNotNull null
-            val config = CycleConfig(parts[10].split(NAME_SEPARATOR).filter { it.isNotEmpty() }, interval, parts[9].toBoolean())
+            val transition = CycleTransition.entries.firstOrNull { it.name == parts.getOrNull(14) } ?: CycleConfig().transition
+            val config = CycleConfig(parts[10].split(NAME_SEPARATOR).filter { it.isNotEmpty() }, interval, parts[9].toBoolean(), transition)
             // 11-field lines only kept a cycle that was running.
             val running = parts.size == 11 || parts[11].toBoolean()
             val current = parts.getOrNull(12)?.ifEmpty { null }

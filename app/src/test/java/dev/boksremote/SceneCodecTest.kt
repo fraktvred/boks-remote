@@ -2,6 +2,7 @@ package dev.boksremote
 
 import dev.boksremote.speaker.CycleConfig
 import dev.boksremote.speaker.CycleSnapshot
+import dev.boksremote.speaker.CycleTransition
 import dev.boksremote.speaker.EnergyLevel
 import dev.boksremote.speaker.LightPalette
 import dev.boksremote.speaker.Scene
@@ -17,7 +18,7 @@ class SceneCodecTest {
             Scene("Wind down", 60, EnergyLevel.LOW, null),
             Scene("Uplight", 128, EnergyLevel.CUSTOM, LightPalette.PRESETS[0]),
             Scene("Party", 200, EnergyLevel.HIGH, LightPalette.PRESETS[1], CycleSnapshot(CycleConfig(listOf("Synthwave", "Mine, with a comma"), 300, shuffle = true), running = true, current = "Synthwave", remainingMs = 42_000)),
-            Scene("Cycle set, not running", 90, EnergyLevel.MEDIUM, null, CycleSnapshot(CycleConfig(listOf("A", "B"), 30, shuffle = false), running = false, current = "B")),
+            Scene("Cycle set, not running", 90, EnergyLevel.MEDIUM, null, CycleSnapshot(CycleConfig(listOf("A", "B"), 30, shuffle = false, transition = CycleTransition.INSTANT), running = false, current = "B")),
             Scene("Nothing known", 90, EnergyLevel.MEDIUM, null, CycleSnapshot(CycleConfig(listOf("A", "B"), 30, shuffle = false), running = false)),
         )
         assertEquals(list, SceneCodec.decode(SceneCodec.encode(list)))

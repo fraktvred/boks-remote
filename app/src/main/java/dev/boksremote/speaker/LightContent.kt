@@ -29,10 +29,29 @@ data class HsvColor(val hue: Float, val saturation: Float, val value: Float) {
         return (0xFF shl 24) or (byte(r) shl 16) or (byte(g) shl 8) or byte(b)
     }
 
+    /**
+     * The colour [t] (0..1) of the way to [to], along the shorter way round the hue circle. A grey has
+     * no hue of its own, so it takes the other colour's and only its saturation moves.
+     */
+    fun blend(to: HsvColor, t: Float): HsvColor {
+        val f = t.coerceIn(0f, 1f)
+        if (f == 1f) return to
+        val from = if (saturation < GREY) copy(hue = to.hue) else this
+        val target = if (to.saturation < GREY) to.copy(hue = from.hue) else to
+        val turn = ((target.hue - from.hue) % 360f + 540f) % 360f - 180f
+        return HsvColor(
+            ((from.hue + turn * f) % 360f + 360f) % 360f,
+            from.saturation + (target.saturation - from.saturation) * f,
+            from.value + (target.value - from.value) * f,
+        )
+    }
+
     /** "#RRGGBB". */
     fun hex(): String = "#%06X".format(toArgb() and 0xFFFFFF)
 
     companion object {
+        private const val GREY = 0.05f
+
         /** Pure-Kotlin RGB→HSV so palette parsing stays testable off-device. */
         fun fromRgb(r: Int, g: Int, b: Int): HsvColor {
             val rf = r / 255f; val gf = g / 255f; val bf = b / 255f
@@ -64,6 +83,9 @@ data class HsvColor(val hue: Float, val saturation: Float, val value: Float) {
  */
 data class LightPalette(val name: String, val colors: List<HsvColor>) {
     init { require(colors.size == SIZE) { "a palette has $SIZE colours" } }
+
+    /** Colour by colour, [t] of the way to [to]; it carries [to]'s name, being on its way there. */
+    fun blend(to: LightPalette, t: Float) = LightPalette(to.name, colors.zip(to.colors) { a, b -> a.blend(b, t) })
 
     companion object {
         const val SIZE = 4

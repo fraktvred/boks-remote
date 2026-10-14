@@ -2,6 +2,7 @@ package dev.boksremote.speaker
 
 import android.bluetooth.BluetoothDevice
 import android.content.Context
+import android.os.SystemClock
 import android.util.Log
 import dev.boksremote.ble.GattConnection
 import dev.boksremote.proto.proto
@@ -18,6 +19,8 @@ import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -375,7 +378,13 @@ class SpeakerController(
         _state.update { it.copy(brightness = v) }
     }
 
-    suspend fun applyEnergyLevel(level: EnergyLevel) {
+    /**
+     * One light-content write at a time, in the order they were made. A light mode change is two
+     * writes, and a palette landing between them doesn't show until the next mode change.
+     */
+    private val lightContent = Mutex()
+
+    suspend fun applyEnergyLevel(level: EnergyLevel) = lightContent.withLock {
         val rpc = requireRpc()
         if (level == EnergyLevel.CUSTOM) {
             checkLightStatus(rpc.call("LightContentService", "SetCustomProgram", LightContentCodec.customProgramRequest(UPLIGHT_PROGRAM)))
@@ -391,20 +400,37 @@ class SpeakerController(
     /** Sends a palette. A fresh id each time, so the light never keeps a cached copy of an earlier edit. */
     fun setPalette(palette: LightPalette) = control("palette") { applyPalette(palette, UUID.randomUUID()) }
 
-    suspend fun applyPalette(palette: LightPalette, id: UUID) {
+    suspend fun applyPalette(palette: LightPalette, id: UUID) = lightContent.withLock {
         requireRpc().call("LightContentService", "SetActivePalette", LightContentCodec.palette(palette, id))
         _state.update { it.copy(palette = palette, paletteIsDefault = false) }
     }
 
+    /**
+     * Blends [from] into [to] over [durationMs] in [FADE_STEPS] evenly spaced writes, the last of them
+     * [to] itself. The steps before it alternate between two fixed ids, like the DMX bridge's, so a fade
+     * doesn't leave a stored palette per step; [to] goes out like any other palette. A step that fails
+     * is skipped.
+     */
+    suspend fun fadePalette(from: LightPalette, to: LightPalette, durationMs: Long) {
+        val start = SystemClock.elapsedRealtime()
+        for (step in 1 until FADE_STEPS) {
+            attemptQuietly { applyPalette(from.blend(to, step.toFloat() / FADE_STEPS), if (step % 2 == 0) FADE_ID_A else FADE_ID_B) }
+            delay((start + durationMs * step / (FADE_STEPS - 1) - SystemClock.elapsedRealtime()).coerceAtLeast(0))
+        }
+        attempt("palette") { applyPalette(to, UUID.randomUUID()) }
+    }
+
     /** Starts a built-in animation; [LightContentCodec.NO_ID] stops it. */
-    suspend fun applyFx(id: UUID) {
+    suspend fun applyFx(id: UUID) = lightContent.withLock {
         checkLightStatus(requireRpc().call("LightContentService", "SetAnimation", LightContentCodec.animationRequest(id)))
     }
 
     fun resetPalette() = control("palette") {
         // The firmware ignores SetActivePalette with AUTO control; the official app uses this dedicated call.
-        requireRpc().call("LightContentService", "ResetActiveColorPalette")
-        _state.update { it.copy(palette = null, paletteIsDefault = true) }
+        lightContent.withLock {
+            requireRpc().call("LightContentService", "ResetActiveColorPalette")
+            _state.update { it.copy(palette = null, paletteIsDefault = true) }
+        }
     }
 
     /** FX pad: an animation plays while held; [fx] null releases it. Latest press wins. */
@@ -590,6 +616,13 @@ class SpeakerController(
         private const val DROP_MS = 2_000L
 
         // Program ids built into the Lightboks firmware, as used by the official app.
+        /**
+         * Each palette sent may cost the light a flash write (see DmxBridge); fewer than this and a fade
+         * shows its steps. 12 over 3 s is one every ~270 ms, about the DMX bridge's own limit.
+         */
+        const val FADE_STEPS = 12
+        private val FADE_ID_A: UUID = UUID.fromString("b0c5d3a0-0d1e-4f7a-9c11-000000000fa0")
+        private val FADE_ID_B: UUID = UUID.fromString("b0c5d3a0-0d1e-4f7a-9c11-000000000fa1")
         private val UPLIGHT_PROGRAM: UUID = UUID.fromString("303c4ee1-e178-4f2f-bc18-6b3f4f682825")
 
         fun bifrostInputs(mask: Int) = listOf(1 to "Bluetooth", 2 to "Team-up", 4 to "AUX", 8 to "XLR 1", 16 to "XLR 2")

@@ -59,4 +59,15 @@ class PaletteToolsTest {
     fun greyPhotoHasNoPalette() {
         assertNull(PhotoPalette.extract(IntArray(100) { 0xFF777777.toInt() }))
     }
+
+    @Test
+    fun blendTakesTheShortWayRoundTheHueCircle() {
+        val mid = HsvColor(350f, 1f, 1f).blend(HsvColor(30f, 1f, 0.5f), 0.5f)
+        assertEquals(10f, mid.hue, 0.01f)
+        assertEquals(0.75f, mid.value, 0.01f)
+        // A grey has no hue to turn from: only its saturation moves towards the colour.
+        assertEquals(200f, HsvColor(0f, 0f, 1f).blend(HsvColor(200f, 1f, 1f), 0.3f).hue, 0.01f)
+        val p = LightPalette.PRESETS
+        assertEquals(p[1], p[0].blend(p[1], 1f))
+    }
 }
