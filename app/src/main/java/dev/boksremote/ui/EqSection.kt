@@ -8,6 +8,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
 import dev.boksremote.audio.BandCalibration
 import dev.boksremote.audio.BandModels
+import dev.boksremote.audio.InputProbe
 import dev.boksremote.audio.RoomMeter
 import kotlinx.coroutines.launch
 import androidx.compose.foundation.Canvas
@@ -190,6 +191,7 @@ internal fun EqSection(s: SpeakerState, speaker: SpeakerController, store: EqPre
         if (tuning) RoomCorrectionSheet(s, speaker, store, shapes, onDismiss = { tuning = false })
     }
     DebugTool("Calibrate bands (debug)", speaker, BandCalibration::run)
+    DebugTool("Probe AUX input (debug)", speaker, InputProbe::run)
 
     if (naming) {
         PaletteNameDialog("Name your custom EQ", initial = "", confirm = "Save", placeholder = "My EQ", onDismiss = { naming = false }) {
