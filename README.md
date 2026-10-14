@@ -9,16 +9,19 @@ An independent Android controller for SOUNDBOKS speakers and the Lightboks over 
 | | Gen 3 / Gen 4 / Go | Mix / Rider (and newer) | Lightboks |
 |---|---|---|---|
 | Volume, battery, active inputs | ✓ | ✓ | battery |
-| Sound profile (default / loud / quiet) | ✓ | ✓ (RPC) | – |
+| Sound profiles (per-model names, e.g. Bass+ / Outdoor / Indoor) | ✓ | ✓ (RPC) | – |
+| Custom 6-band EQ, saved presets | ✓ | ✓ (RPC) | – |
 | Team-up solo / host / join, stereo channel | ✓ | ✓ | team-up |
 | Brightness, light mode | – | – | ✓ |
 | Rename, auto power-off | – | ✓ (RPC) | ✓ (RPC) |
 | Owner pincode | firmware ≥ 3 | ✓ | ✓ |
 | Power off | ✓ | ✓ | ✓ |
 
+Custom EQ: drag six points from bass to treble (±10 dB) and hear it live, then save the curve as a named preset on the phone. Long-press a saved preset to rename or delete it.
+
 Lightboks extras: four-colour palettes (a preset browser, a colour editor, and your own saved palettes), Uplight, held FX (strobe, blackout, chase, sparkle) and the DMX bridge below.
 
-Not supported: firmware updates, registration, anti-theft lock/unlock (these need SOUNDBOKS's servers), and custom EQ bands.
+Not supported: firmware updates, registration and anti-theft lock/unlock (these need SOUNDBOKS's servers). Saved EQ presets stay on the phone rather than syncing to a SOUNDBOKS account.
 
 ## DMX bridge (Lightboks)
 

@@ -292,7 +292,14 @@ fun PalettePickerSheet(
 }
 
 @Composable
-internal fun PaletteNameDialog(title: String, initial: String, confirm: String, onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
+internal fun PaletteNameDialog(
+    title: String,
+    initial: String,
+    confirm: String,
+    placeholder: String = "My palette",
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit,
+) {
     var name by remember { mutableStateOf(initial) }
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -302,7 +309,7 @@ internal fun PaletteNameDialog(title: String, initial: String, confirm: String, 
                 value = name,
                 onValueChange = { name = it.take(PaletteCodec.MAX_NAME) },
                 label = { Text("Name") },
-                placeholder = { Text("My palette") },
+                placeholder = { Text(placeholder) },
                 singleLine = true,
             )
         },
