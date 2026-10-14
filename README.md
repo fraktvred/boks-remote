@@ -53,25 +53,26 @@ Every release is signed with the same key, so a newer APK installs over the old 
 
 ## Features
 
-| | Gen 3 / Gen 4 / Go | Mix / Rider (and newer) | Lightboks |
-|---|---|---|---|
-| Volume and mute, battery, active inputs | ✓ | ✓ | battery |
-| Sound profiles (per-model names, e.g. Bass+ / Outdoor / Indoor) | ✓ | ✓ (RPC) | – |
-| Custom 6-band EQ, saved presets | ✓ | ✓ (RPC) | – |
-| Room tuning by microphone | approx. | Mix; others approx. | – |
-| Team-up solo / host / join, stereo channel | ✓ | ✓ | team-up |
-| Brightness, light mode | – | – | ✓ |
-| Colour palettes, held effects, DMX bridge | – | – | ✓ |
-| Rename, auto power-off | – | ✓ (RPC) | ✓ (RPC) |
-| Owner pincode | firmware ≥ 3 | ✓ | ✓ |
-| Power off | ✓ | ✓ | ✓ |
+| | Gen 3 / Gen 4 / Go | Mix / Rider (and newer) | Lightboks | Official app |
+|---|---|---|---|---|
+| **Room tuning by microphone** | approx. | Mix; others approx. | – | **–** |
+| **DMX bridge (Art-Net / sACN)** | – | – | ✓ | **–** |
+| Volume and mute, battery, active inputs | ✓ | ✓ | battery | ✓ |
+| Sound profiles (per-model names, e.g. Bass+ / Outdoor / Indoor) | ✓ | ✓ (RPC) | – | ✓ |
+| Custom 6-band EQ, saved presets | ✓ | ✓ (RPC) | – | ✓ |
+| Team-up solo / host / join, stereo channel | ✓ | ✓ | team-up | ✓ |
+| Brightness, light mode, colour palettes, held effects | – | – | ✓ | ✓ |
+| Rename, auto power-off | – | ✓ (RPC) | ✓ (RPC) | ✓ |
+| Owner pincode | firmware ≥ 3 | ✓ | ✓ | ✓ |
+| Power off | ✓ | ✓ | ✓ | ✓ |
+| Firmware updates, registration, anti-theft lock | – | – | – | ✓ |
 
-<sub>**RPC:** on these models the feature goes through the protobuf command channel of newer firmware. **approx.:** this model's EQ bands haven't been [measured](#help-measure-your-speaker) yet, so room tuning uses the Mix's. **firmware ≥ 3:** older Gen 3 firmware has no command channel for the pincode, so it has to be entered in the official app.</sub>
+<sub>**Bold rows** (at the top) are only in Boks Remote; the last column compares with the official SOUNDBOKS app. **RPC:** on these models the feature goes through the protobuf command channel of newer firmware. **approx.:** this model's EQ bands haven't been [measured](#help-measure-your-speaker) yet, so room tuning uses the Mix's. **firmware ≥ 3:** older Gen 3 firmware has no command channel for the pincode, so it has to be entered in the official app.</sub>
 
 - **Custom EQ:** drag six bands (±10 dB), hear the change live, and save curves on the phone.
 - **Room tuning:** measure at a few listening spots with the phone or a USB microphone and get a suggested EQ.
 
-Not supported: firmware updates, registration and anti-theft lock/unlock (these need SOUNDBOKS's servers). Saved EQs stay on the phone rather than syncing to a SOUNDBOKS account.
+Firmware updates, registration and anti-theft lock need SOUNDBOKS's servers, so they stay in the official app. Saved EQs stay on the phone rather than syncing to a SOUNDBOKS account.
 
 ## Help measure your speaker
 
