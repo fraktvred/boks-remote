@@ -4,6 +4,7 @@ import android.bluetooth.BluetoothDevice
 import android.content.Context
 import android.util.Log
 import dev.boksremote.ble.GattConnection
+import dev.boksremote.proto.ProtoMessage
 import dev.boksremote.proto.proto
 import dev.boksremote.protocol.Advertisement
 import dev.boksremote.protocol.Family
@@ -68,18 +69,31 @@ data class SpeakerState(
 /**
  * One connected speaker. Routes each control to the right characteristic or RPC for the
  * product family and keeps [state] in sync with speaker notifications.
+ *
+ * Without a [gatt] it is a demo device (see [demo]): every control lands in [state] and goes nowhere else.
  */
-class SpeakerController(
-    context: Context,
-    device: BluetoothDevice,
+class SpeakerController private constructor(
+    private val gatt: GattConnection?,
+    private val address: String,
     private val advert: Advertisement?,
+    initial: SpeakerState,
     private val scope: CoroutineScope,
     private val pincodes: PincodeStore,
 ) : Light {
-    private val address = device.address
-    private val gatt = GattConnection(context, device)
+    constructor(context: Context, device: BluetoothDevice, advert: Advertisement?, scope: CoroutineScope, pincodes: PincodeStore) : this(
+        GattConnection(context, device),
+        device.address,
+        advert,
+        SpeakerState(family = advert?.family, model = advert?.model, name = advert?.name, firmware = advert?.firmware),
+        scope,
+        pincodes,
+    )
+
+    val demo get() = gatt == null
+    /** The Bluetooth link, for what only a real device does: connecting, reading and subscribing. */
+    private val ble get() = checkNotNull(gatt) { "a demo device has no Bluetooth link" }
     private var rpc: RpcClient? = null
-    private val _state = MutableStateFlow(SpeakerState(family = advert?.family, model = advert?.model, name = advert?.name, firmware = advert?.firmware))
+    private val _state = MutableStateFlow(initial)
     override val state: StateFlow<SpeakerState> = _state
 
     // Slider drags produce many values; only the latest matters, so a conflated channel drops stale ones.
@@ -93,8 +107,8 @@ class SpeakerController(
     private val family get() = _state.value.family
 
     private val link = object : LightLink {
-        override suspend fun call(service: String, method: String, request: ByteArray) = requireRpc().call(service, method, request)
-        override suspend fun write(characteristic: UUID, value: ByteArray) = gatt.write(characteristic, value)
+        override suspend fun call(service: String, method: String, request: ByteArray) = this@SpeakerController.call(service, method, request)
+        override suspend fun write(characteristic: UUID, value: ByteArray) = this@SpeakerController.write(characteristic, value)
     }
     /** The light's content: palette, mode and effects. Only a Lightboks has any. */
     val lightboks = Lightboks(link, _state, scope, ::report)
@@ -102,28 +116,11 @@ class SpeakerController(
     fun connect() {
         // Reconnect reuses this controller, so drop the previous session's collectors first.
         stopSession()
-        // Set before launching, so a caller awaiting the outcome never sees the previous FAILED/DISCONNECTED.
-        _state.update { it.copy(connection = ConnectionState.CONNECTING, message = null) }
-        jobs += scope.launch {
-            try {
-                gatt.connect()
-                setUp()
-                _state.update { it.copy(connection = ConnectionState.CONNECTED) }
-            } catch (e: Exception) {
-                // Superseded by a newer connect(): rethrow, since this disconnect would tear down the new
-                // attempt. A timeout is not a cancellation of this job and is reported as a failure.
-                currentCoroutineContext().ensureActive()
-                Log.w(TAG, "connect failed", e)
-                gatt.disconnect()
-                _state.update { it.copy(connection = ConnectionState.FAILED, message = e.message ?: "Connection failed") }
-            }
-        }
-        jobs += scope.launch {
-            gatt.state.collect { s ->
-                if (s == GattConnection.State.DISCONNECTED && _state.value.connection == ConnectionState.CONNECTED) {
-                    _state.update { it.copy(connection = ConnectionState.DISCONNECTED, message = if (family == Family.LIGHT) "Lightboks disconnected" else "Speaker disconnected") }
-                }
-            }
+        if (demo) {
+            // There is nothing to reach: the demo device is just as it was left.
+            _state.update { it.copy(connection = ConnectionState.CONNECTED, message = null) }
+        } else {
+            connectLink()
         }
         jobs += scope.launch { for (v in volumeWrites) attempt("volume") { writeVolume(v) } }
         jobs += scope.launch {
@@ -132,6 +129,33 @@ class SpeakerController(
         jobs += scope.launch { for (v in brightnessWrites) attempt("brightness") { lightboks.applyBrightness(v) } }
         jobs += scope.launch { for (w in eqWrites) attempt("EQ") { if (w.bands != null) writeCustomEq(w.bands) else writeEqMode(w.mode) } }
     }
+
+    private fun connectLink() {
+        // Set before launching, so a caller awaiting the outcome never sees the previous FAILED/DISCONNECTED.
+        _state.update { it.copy(connection = ConnectionState.CONNECTING, message = null) }
+        jobs += scope.launch {
+            try {
+                ble.connect()
+                setUp()
+                _state.update { it.copy(connection = ConnectionState.CONNECTED) }
+            } catch (e: Exception) {
+                // Superseded by a newer connect(): rethrow, since this disconnect would tear down the new
+                // attempt. A timeout is not a cancellation of this job and is reported as a failure.
+                currentCoroutineContext().ensureActive()
+                Log.w(TAG, "connect failed", e)
+                ble.disconnect()
+                _state.update { it.copy(connection = ConnectionState.FAILED, message = e.message ?: "Connection failed") }
+            }
+        }
+        jobs += scope.launch {
+            ble.state.collect { s ->
+                if (s == GattConnection.State.DISCONNECTED && _state.value.connection == ConnectionState.CONNECTED) dropped()
+            }
+        }
+    }
+
+    private fun dropped() =
+        _state.update { it.copy(connection = ConnectionState.DISCONNECTED, message = if (family == Family.LIGHT) "Lightboks disconnected" else "Speaker disconnected") }
 
     /** Connects again and waits for the outcome; for callers that keep the link alive (the DMX bridge). */
     suspend fun reconnect(): Boolean {
@@ -145,7 +169,7 @@ class SpeakerController(
 
     fun disconnect() {
         stopSession()
-        gatt.disconnect()
+        gatt?.disconnect()
     }
 
     private fun stopSession() {
@@ -159,9 +183,9 @@ class SpeakerController(
         val family = detectFamily()
         _state.update { it.copy(family = family) }
         val model = _state.value.model
-        gatt.requestMtu(model?.mtuCap ?: if (family == Family.LEGACY) 96 else 247)
+        ble.requestMtu(model?.mtuCap ?: if (family == Family.LEGACY) 96 else 247)
 
-        jobs += scope.launch { gatt.notifications.collect { onNotify(it.characteristic, it.value) } }
+        jobs += scope.launch { ble.notifications.collect { onNotify(it.characteristic, it.value) } }
 
         setUpRpc(family)
         readInitialState(family)
@@ -170,9 +194,9 @@ class SpeakerController(
     }
 
     private fun detectFamily(): Family = when {
-        gatt.hasService(Uuids.SPEAKER_CONTROL_SERVICE) -> Family.BIFROST
-        gatt.hasService(Uuids.LIGHT_CONTROL_SERVICE) -> Family.LIGHT
-        gatt.hasCharacteristic(Uuids.LEGACY_VOLUME) -> Family.LEGACY
+        ble.hasService(Uuids.SPEAKER_CONTROL_SERVICE) -> Family.BIFROST
+        ble.hasService(Uuids.LIGHT_CONTROL_SERVICE) -> Family.LIGHT
+        ble.hasCharacteristic(Uuids.LEGACY_VOLUME) -> Family.LEGACY
         else -> advert?.family ?: throw IllegalStateException("Not a supported SOUNDBOKS device")
     }
 
@@ -182,8 +206,8 @@ class SpeakerController(
             // Pre-3.0 legacy firmware speaks an ASCII serial protocol on the same pair instead of RPC.
             Family.LEGACY -> if (versionAtLeast(_state.value.firmware, 3) || _state.value.firmware == null) Uuids.LEGACY_UART_TX to Uuids.LEGACY_UART_RX else return
         }
-        if (!gatt.hasCharacteristic(tx) || !gatt.hasCharacteristic(rx)) return
-        val client = RpcClient(gatt, tx, rx, scope)
+        if (!ble.hasCharacteristic(tx) || !ble.hasCharacteristic(rx)) return
+        val client = RpcClient(ble, tx, rx, scope)
         try {
             client.start()
             rpc = client
@@ -265,7 +289,7 @@ class SpeakerController(
             Family.LIGHT -> listOf(Uuids.LIGHT_BRIGHTNESS, Uuids.LIGHT_ENERGY_LEVEL, Uuids.BATTERY_LEVEL, Uuids.TEAMUP_MODE)
             Family.LEGACY -> listOf(Uuids.LEGACY_VOLUME, Uuids.LEGACY_STEREO_ROLE, Uuids.LEGACY_SOUND_STATUS, Uuids.LEGACY_SKAA_MODE, Uuids.LEGACY_POWER_MODE)
         }
-        for (c in chars) if (gatt.hasCharacteristic(c)) attemptQuietly { gatt.enableNotifications(c) }
+        for (c in chars) if (ble.hasCharacteristic(c)) attemptQuietly { ble.enableNotifications(c) }
     }
 
     private fun onNotify(c: UUID, v: ByteArray) {
@@ -359,7 +383,7 @@ class SpeakerController(
 
     private suspend fun writeVolume(v: Int) {
         val c = if (family == Family.LEGACY) Uuids.LEGACY_VOLUME else Uuids.VOLUME
-        gatt.write(c, byteArrayOf(v.toByte()))
+        write(c, byteArrayOf(v.toByte()))
     }
 
     override fun setBrightness(value: Int) {
@@ -392,15 +416,15 @@ class SpeakerController(
     fun holdDrop(held: Boolean) = lightboks.holdDrop(held)
 
     fun setStereoRole(role: StereoRole) = control("stereo role") {
-        gatt.write(if (family == Family.LEGACY) Uuids.LEGACY_STEREO_ROLE else Uuids.STEREO_ROLE, byteArrayOf(role.ordinal.toByte()))
+        write(if (family == Family.LEGACY) Uuids.LEGACY_STEREO_ROLE else Uuids.STEREO_ROLE, byteArrayOf(role.ordinal.toByte()))
         _state.update { it.copy(stereoRole = role) }
     }
 
     fun setTeamUp(mode: TeamUpMode) = control("team-up") {
         if (family == Family.LEGACY) {
-            gatt.write(Uuids.LEGACY_SKAA_MODE, mode.name.lowercase().toByteArray(Charsets.US_ASCII))
+            write(Uuids.LEGACY_SKAA_MODE, mode.name.lowercase().toByteArray(Charsets.US_ASCII))
         } else {
-            gatt.write(Uuids.TEAMUP_MODE, byteArrayOf(mode.ordinal.toByte()))
+            write(Uuids.TEAMUP_MODE, byteArrayOf(mode.ordinal.toByte()))
         }
         _state.update { it.copy(teamUp = mode) }
     }
@@ -419,28 +443,27 @@ class SpeakerController(
 
     private suspend fun writeEqMode(mode: EqMode) {
         if (family == Family.LEGACY) {
-            gatt.write(Uuids.LEGACY_EQ_MODE, byteArrayOf(mode.ordinal.toByte()))
+            write(Uuids.LEGACY_EQ_MODE, byteArrayOf(mode.ordinal.toByte()))
         } else {
-            requireRpc().call("AudioControlService", "SetEqMode", proto { int32(1, mode.ordinal) })
+            call("AudioControlService", "SetEqMode", proto { int32(1, mode.ordinal) })
         }
     }
 
     private suspend fun writeCustomEq(bandsDb: List<Int>) {
         val wire = EqCurve.toWire(bandsDb)
         if (family == Family.LEGACY) {
-            gatt.write(Uuids.LEGACY_EQ_MODE, byteArrayOf(EqMode.USER.ordinal.toByte()) + wire)
+            write(Uuids.LEGACY_EQ_MODE, byteArrayOf(EqMode.USER.ordinal.toByte()) + wire)
         } else {
             // Same order as the official app: switch to the user curve, then load its bands.
-            val rpc = requireRpc()
-            rpc.call("AudioControlService", "SetEqMode", proto { int32(1, EqMode.USER.ordinal) })
-            rpc.call("AudioControlService", "SetEqBands", proto { uint32(1, EqCurve.BANDS); bytes(2, wire) })
+            call("AudioControlService", "SetEqMode", proto { int32(1, EqMode.USER.ordinal) })
+            call("AudioControlService", "SetEqBands", proto { uint32(1, EqCurve.BANDS); bytes(2, wire) })
         }
     }
 
     /** Legacy EQ characteristic: mode byte, followed by the bands when the mode is user-defined. */
     private suspend fun readLegacyEq() {
-        if (!gatt.hasCharacteristic(Uuids.LEGACY_EQ_MODE)) return
-        val raw = try { gatt.read(Uuids.LEGACY_EQ_MODE) } catch (e: Exception) { Log.d(TAG, "read EQ: ${e.message}"); return }
+        if (!ble.hasCharacteristic(Uuids.LEGACY_EQ_MODE)) return
+        val raw = try { ble.read(Uuids.LEGACY_EQ_MODE) } catch (e: Exception) { Log.d(TAG, "read EQ: ${e.message}"); return }
         val mode = raw.firstOrNull()?.toInt()?.and(0xFF)?.let { EqMode.entries.getOrNull(it) }
         val bands = if (mode == EqMode.USER) EqCurve.fromWire(raw.copyOfRange(1, raw.size)) else null
         _state.update { it.copy(eq = mode, eqBands = bands) }
@@ -458,23 +481,30 @@ class SpeakerController(
 
     private suspend fun setAuxInput(config: dev.boksremote.proto.ProtoWriter.() -> Unit) {
         // InputConfigMessage{input: {type: AUX, index: 0}, configs: [config]}
-        val r = requireRpc().call("AudioControlService", "SetInputConfig", proto { message(1) { int32(1, 0); uint32(2, 0) }; message(2, config) })
+        val r = call("AudioControlService", "SetInputConfig", proto { message(1) { int32(1, 0); uint32(2, 0) }; message(2, config) })
         if (r.int(1) != 0) throw IllegalStateException("speaker rejected the input setting")
     }
 
     fun setName(name: String) = control("name") {
-        requireRpc().call("DeviceInformationService", "SetName", proto { string(1, name) })
+        call("DeviceInformationService", "SetName", proto { string(1, name) })
         _state.update { it.copy(name = name) }
     }
 
     fun setAutoOff(minutes: Int) = control("auto-off") {
-        val r = requireRpc().call("SystemService", "SetAutoOff", proto { uint32(1, minutes) })
+        val r = call("SystemService", "SetAutoOff", proto { uint32(1, minutes) })
         if (r.int(1) != 0) throw IllegalStateException("speaker rejected the value")
         _state.update { it.copy(autoOffMinutes = minutes) }
     }
 
     /** SystemService.PowerOff{type: REBOOT}. Only RPC devices can restart; the link drops while it boots. */
     fun restart() = scope.launch {
+        if (demo) {
+            // Gone while it boots, then back by itself.
+            dropped()
+            delay(DEMO_RESTART_MS)
+            if (_state.value.connection == ConnectionState.DISCONNECTED) connect()
+            return@launch
+        }
         val rpc = rpc ?: return@launch
         _state.update { it.copy(message = "Restarting…") }
         // The light reboots before it can answer, so a timeout or dropped link here means it worked.
@@ -483,8 +513,9 @@ class SpeakerController(
 
     override fun powerOff() {
         control("power off") {
-            if (family == Family.LEGACY) gatt.write(Uuids.LEGACY_POWER_MODE, byteArrayOf(0))
-            else gatt.write(Uuids.SYSTEM_POWER, byteArrayOf(0, 0)) // [OFF, no reboot]
+            if (family == Family.LEGACY) write(Uuids.LEGACY_POWER_MODE, byteArrayOf(0))
+            else write(Uuids.SYSTEM_POWER, byteArrayOf(0, 0)) // [OFF, no reboot]
+            if (demo) dropped()
         }
     }
 
@@ -493,6 +524,15 @@ class SpeakerController(
     // --- helpers -------------------------------------------------------------------------------
 
     private fun requireRpc() = rpc ?: throw IllegalStateException("not supported on this speaker")
+
+    /** A characteristic write; a demo device takes it without a word. */
+    private suspend fun write(c: UUID, value: ByteArray) {
+        gatt?.write(c, value)
+    }
+
+    /** An RPC call; a demo device answers every one with an empty message, which reads as success. */
+    private suspend fun call(service: String, method: String, request: ByteArray = ByteArray(0)): ProtoMessage =
+        if (demo) ProtoMessage(emptyList()) else requireRpc().call(service, method, request)
 
     private fun control(what: String, block: suspend () -> Unit) = scope.launch { attempt(what, block) }
 
@@ -518,19 +558,24 @@ class SpeakerController(
     }
 
     private suspend fun readByte(c: UUID): Int? {
-        if (!gatt.hasCharacteristic(c)) return null
-        return try { gatt.read(c).firstOrNull()?.toInt()?.and(0xFF) } catch (e: Exception) { Log.d(TAG, "read $c: ${e.message}"); null }
+        if (!ble.hasCharacteristic(c)) return null
+        return try { ble.read(c).firstOrNull()?.toInt()?.and(0xFF) } catch (e: Exception) { Log.d(TAG, "read $c: ${e.message}"); null }
     }
 
     private suspend fun readString(c: UUID): String? {
-        if (!gatt.hasCharacteristic(c)) return null
-        return try { String(gatt.read(c), Charsets.UTF_8).trim('\u0000', ' ').ifBlank { null } } catch (e: Exception) { null }
+        if (!ble.hasCharacteristic(c)) return null
+        return try { String(ble.read(c), Charsets.UTF_8).trim('\u0000', ' ').ifBlank { null } } catch (e: Exception) { null }
     }
 
     companion object {
         private const val TAG = "SpeakerController"
         /** About 30 %, a safe level to unmute to when the previous one is unknown. */
         private const val UNMUTE_DEFAULT = 77
+        private const val DEMO_RESTART_MS = 3_000L
+
+        /** [device]'s dummy for demo mode, in the state it starts in. */
+        fun demo(device: DemoDevice, scope: CoroutineScope, pincodes: PincodeStore) =
+            SpeakerController(null, device.advert.address, device.advert, device.initial, scope, pincodes)
 
         fun bifrostInputs(mask: Int) = listOf(1 to "Bluetooth", 2 to "Team-up", 4 to "AUX", 8 to "XLR 1", 16 to "XLR 2")
             .filter { mask and it.first != 0 }.map { it.second }

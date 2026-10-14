@@ -224,7 +224,7 @@ private fun Controls(s: SpeakerState, speaker: SpeakerController, app: BoksApp) 
     val bridge by app.bridge.status.collectAsState()
     val cycle by app.cycle.status.collectAsState()
     val sleep by app.sleep.status.collectAsState()
-    DeviceHeader(s)
+    DeviceHeader(s, speaker.demo)
     if (s.locked) {
         Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
             Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -320,13 +320,14 @@ private fun autoOffLabel(minutes: Int) = when {
 /** Who this is and what it is doing; the facts that used to be a single line of text. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun DeviceHeader(s: SpeakerState) {
+private fun DeviceHeader(s: SpeakerState, demo: Boolean) {
     Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
         DeviceBadge(s.family, size = 64.dp)
         Spacer(Modifier.width(16.dp))
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(s.model?.label ?: "SOUNDBOKS device", style = MaterialTheme.typography.titleMedium)
             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (demo) Pill(null, "Demo")
                 s.battery?.let { Pill(batteryIcon(it), "$it%") }
                 s.activeInputs.forEach { Pill(null, it) }
                 s.firmware?.let { Pill(null, "Firmware $it") }

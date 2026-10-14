@@ -65,9 +65,10 @@ private fun App(app: BoksApp) {
         return
     }
     val speaker by app.speaker.collectAsState()
+    val demoMode by app.demoMode.collectAsState()
     val current = speaker
     if (current == null) {
-        ScanScreen(app.scanner, onOpen = app::open)
+        ScanScreen(app.scanner, demoMode, onDemoModeChange = app::setDemoMode, onOpen = app::open, onOpenDemo = app::openDemo)
     } else {
         BackHandler { app.close() }
         SpeakerScreen(current, app, onBack = app::close)
