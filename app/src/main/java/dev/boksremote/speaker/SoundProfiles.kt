@@ -4,8 +4,9 @@ import dev.boksremote.protocol.ProductModel
 
 /**
  * A built-in sound profile as the official app presents it. The speaker only knows the wire mode
- * (default/loud/quiet); what each one is called and how it sounds depends on the model. [bass],
- * [mid] and [treble] are the official app's 0..100 character bars, not real band gains.
+ * (default/loud/quiet); what each one is called and how it sounds depends on the model. The
+ * descriptions are plain rewrites of the official marketing copy. [bass], [mid] and [treble] are
+ * the official app's 0..100 character bars, not real band gains.
  */
 data class SoundProfile(
     val mode: EqMode,
@@ -18,10 +19,10 @@ data class SoundProfile(
 )
 
 object SoundProfiles {
-    private const val BASS_PLUS = "Maximum bass. Minimum distortion. Better to ask for forgiveness than permission, right?"
-    private const val OUTDOOR = "Best experienced outdoors. Sound sculpted for mad moments in the wild, wherever you end up."
-    private const val INDOOR = "Made for indoor listening. Turn kitchens, lounges, heck–even bathrooms–into legit party spaces."
-    private const val POWER = "More power for less power. Amazingly loud with ultimate battery efficiency."
+    private const val BASS_PLUS = "The most bass of the three profiles. Uses the most battery."
+    private const val OUTDOOR = "Lifts bass and treble so the sound carries in open spaces, where no walls reinforce it."
+    private const val INDOOR = "Less bass, so enclosed rooms don't boom."
+    private const val POWER = "Loud with lower power draw than Bass+, for longer battery life."
 
     /** In the official app's tile order: loud, default, quiet. */
     fun forModel(model: ProductModel?): List<SoundProfile> = when (model) {

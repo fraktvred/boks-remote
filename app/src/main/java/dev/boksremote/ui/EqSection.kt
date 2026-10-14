@@ -21,11 +21,10 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -91,6 +90,18 @@ import dev.boksremote.speaker.SpeakerController
 import dev.boksremote.speaker.SpeakerState
 import kotlin.math.abs
 import kotlin.math.roundToInt
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material3.IconButton
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.text.font.FontWeight
 
 private fun profileIcon(title: String): ImageVector = when (title) {
     "Bass+" -> Icons.Default.GraphicEq
@@ -106,11 +117,11 @@ private fun profileIcon(title: String): ImageVector = when (title) {
 private fun dbLabel(db: Int) = if (db > 0) "+$db dB" else "$db dB"
 
 /**
- * Built-in profiles, the user's saved curves and "+" for a new one, over a panel for whatever is
- * active. A saved curve is active when the speaker plays exactly its bands; any other user curve
- * is unsaved "Custom". Long-press a saved curve to rename or delete it.
+ * The built-in profiles and Custom as one row of four modes, the user's saved curves and "New EQ"
+ * as a grid below, then a panel for whatever is active. A saved curve is active when the speaker
+ * plays exactly its bands; any other user curve is unsaved and selects "New EQ". The active saved
+ * curve is renamed or deleted from the editor's menu, any saved curve by long-pressing its card.
  */
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun EqSection(s: SpeakerState, speaker: SpeakerController, store: EqPresetStore) {
     val saved by store.presets.collectAsState()
@@ -123,49 +134,58 @@ internal fun EqSection(s: SpeakerState, speaker: SpeakerController, store: EqPre
     if (activeSaved != null) origin = activeSaved
     if (!custom) origin = null
     var menuFor by remember { mutableStateOf<EqPreset?>(null) }
+    var editorMenu by remember { mutableStateOf(false) }
     var naming by remember { mutableStateOf(false) }
     var renaming by remember { mutableStateOf<EqPreset?>(null) }
     var deleting by remember { mutableStateOf<EqPreset?>(null) }
     var tuning by remember { mutableStateOf(false) }
 
-    // Wraps rather than scrolls, so "+" and every saved curve stay in view.
-    FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         profiles.forEach { p ->
-            ProfileTile(p.title, profileIcon(p.title), selected = s.eq == p.mode, onClick = { speaker.setEq(p.mode) })
+            ProfileTile(p.title, profileIcon(p.title), selected = s.eq == p.mode, onClick = { speaker.setEq(p.mode) }, Modifier.weight(1f))
         }
-        saved.forEach { p ->
-            Box {
-                ProfileTile(
-                    p.name,
-                    Icons.Default.Tune,
-                    selected = activeSaved == p,
-                    onClick = { origin = p; speaker.setCustomEq(p.bands) },
-                    onLongClick = { menuFor = p },
-                )
-                DropdownMenu(expanded = menuFor == p, onDismissRequest = { menuFor = null }) {
-                    DropdownMenuItem(text = { Text("Rename") }, leadingIcon = { Icon(Icons.Default.Edit, null) }, onClick = { renaming = p; menuFor = null })
-                    DropdownMenuItem(text = { Text("Delete") }, leadingIcon = { Icon(Icons.Default.Delete, null) }, onClick = { deleting = p; menuFor = null })
+        // Back to whatever curve the speaker still holds, saved or not; a new one starts from Reset.
+        ProfileTile("Custom", Icons.Default.Tune, selected = custom, onClick = { if (!custom) speaker.setCustomEq(bands) }, Modifier.weight(1f))
+    }
+
+    // A fixed two-column grid with "New EQ" last, so cards never reflow when the selection changes.
+    ControlLabel("Your EQs")
+    val newSelected = custom && activeSaved == null && origin == null
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        (saved + null).chunked(2).forEach { row ->
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                row.forEach { p ->
+                    Box(Modifier.weight(1f)) {
+                        if (p == null) {
+                            NewEqCard(selected = newSelected, onClick = { origin = null; speaker.setCustomEq(EqCurve.FLAT) })
+                        } else {
+                            EqCard(p.name, selected = activeSaved == p, onClick = { origin = p; speaker.setCustomEq(p.bands) }, onLongClick = { menuFor = p }) {
+                                EqSparkline(p.bands, it, Modifier.fillMaxSize())
+                            }
+                            PresetMenu(expanded = menuFor == p, onDismiss = { menuFor = null }, onRename = { renaming = p }, onDelete = { deleting = p })
+                        }
+                    }
                 }
+                if (row.size == 1) Spacer(Modifier.weight(1f))
             }
         }
-        ProfileTile(
-            "Custom",
-            Icons.Default.Add,
-            selected = custom && activeSaved == null,
-            onClick = {
-                if (custom && activeSaved == null) return@ProfileTile
-                origin = null
-                // Pick up an unsaved curve the speaker still holds; otherwise start flat.
-                speaker.setCustomEq(s.eqBands?.takeIf { b -> saved.none { it.bands == b } } ?: EqCurve.FLAT)
-            },
-        )
     }
 
     if (custom) {
         val editing = origin?.takeIf { activeSaved == null }
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(activeSaved?.name ?: editing?.let { "${it.name} · edited" } ?: "Custom EQ", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-            TextButton(onClick = { speaker.setCustomEq(EqCurve.FLAT) }, enabled = bands != EqCurve.FLAT) { Text("Reset") }
+            Text(activeSaved?.name ?: editing?.let { "${it.name} · edited" } ?: "New EQ", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (editing != null) {
+                TextButton(onClick = { speaker.setCustomEq(editing.bands) }) { Text("Revert") }
+            } else {
+                TextButton(onClick = { speaker.setCustomEq(EqCurve.FLAT) }, enabled = bands != EqCurve.FLAT) { Text("Reset") }
+            }
+            activeSaved?.let { p ->
+                Box {
+                    IconButton(onClick = { editorMenu = true }) { Icon(Icons.Default.MoreVert, contentDescription = "More for ${p.name}") }
+                    PresetMenu(expanded = editorMenu, onDismiss = { editorMenu = false }, onRename = { renaming = p }, onDelete = { deleting = p })
+                }
+            }
         }
         EqGraph(bands, onChange = speaker::setCustomEq)
         when {
@@ -175,20 +195,17 @@ internal fun EqSection(s: SpeakerState, speaker: SpeakerController, store: EqPre
                 }
                 OutlinedButton(onClick = { naming = true }, modifier = Modifier.weight(1f)) { Text("Save as new") }
             }
-            activeSaved == null -> Button(onClick = { naming = true }, modifier = Modifier.fillMaxWidth()) { Text("Save") }
-            else -> HintText("Drag the points to change it. Long-press its tile to rename or delete it.")
+            activeSaved != null -> Unit
+            bands == EqCurve.FLAT -> HintText("Drag a point up or down to shape the sound. The speaker follows as you drag.")
+            else -> Button(onClick = { naming = true }, modifier = Modifier.fillMaxWidth()) { Text("Save to Your EQs") }
         }
     } else {
         profiles.firstOrNull { it.mode == s.eq }?.let { ProfileDetails(it) }
-            ?: HintText("Pick a sound profile, or tap Custom to shape your own.")
+            ?: HintText("Pick a sound profile, or tap New EQ to shape your own.")
     }
 
     BandModels.forModel(s.model)?.let { shapes ->
-        TextButton(onClick = { tuning = true }) {
-            Icon(Icons.Default.Mic, contentDescription = null, modifier = Modifier.size(18.dp))
-            Spacer(Modifier.width(8.dp))
-            Text("Tune to this room")
-        }
+        TuneRoomRow(onClick = { tuning = true })
         if (tuning) RoomCorrectionWizard(s, speaker, store, shapes, onDismiss = { tuning = false })
     }
     val calibrationCsv = File(LocalContext.current.getExternalFilesDir(null), "bandcal.csv")
@@ -225,33 +242,36 @@ internal fun EqSection(s: SpeakerState, speaker: SpeakerController, store: EqPre
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun ProfileTile(label: String, icon: ImageVector, selected: Boolean, onClick: () -> Unit, onLongClick: (() -> Unit)? = null) {
+private fun PresetMenu(expanded: Boolean, onDismiss: () -> Unit, onRename: () -> Unit, onDelete: () -> Unit) {
+    DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
+        DropdownMenuItem(text = { Text("Rename") }, leadingIcon = { Icon(Icons.Default.Edit, null) }, onClick = { onRename(); onDismiss() })
+        DropdownMenuItem(text = { Text("Delete") }, leadingIcon = { Icon(Icons.Default.Delete, null) }, onClick = { onDelete(); onDismiss() })
+    }
+}
+
+@Composable
+private fun ProfileTile(label: String, icon: ImageVector, selected: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
     val haptics = LocalHapticFeedback.current
     val colors = MaterialTheme.colorScheme
     Column(
-        Modifier
-            .width(76.dp)
+        modifier
             .clip(RoundedCornerShape(12.dp))
-            .combinedClickable(
-                onClick = {
-                    if (!selected) haptics.performHapticFeedback(HapticFeedbackType.SegmentTick)
-                    onClick()
-                },
-                onLongClick = onLongClick?.let { { haptics.performHapticFeedback(HapticFeedbackType.LongPress); it() } },
-                onLongClickLabel = onLongClick?.let { "Rename or delete" },
-            ),
+            .selectable(selected = selected, role = Role.RadioButton) {
+                if (!selected) haptics.performHapticFeedback(HapticFeedbackType.SegmentTick)
+                onClick()
+            },
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Box(
             Modifier
-                .size(64.dp)
+                .fillMaxWidth()
+                .height(56.dp)
                 .clip(RoundedCornerShape(12.dp))
                 .background(if (selected) colors.primary else colors.surfaceContainerHighest),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(icon, contentDescription = null, tint = if (selected) colors.onPrimary else colors.onSurface, modifier = Modifier.size(28.dp))
+            Icon(icon, contentDescription = null, tint = if (selected) colors.onPrimary else colors.onSurface, modifier = Modifier.size(26.dp))
         }
         Text(
             label,
@@ -264,16 +284,105 @@ private fun ProfileTile(label: String, icon: ImageVector, selected: Boolean, onC
     }
 }
 
-/** Description, the official app's bass/mid/treble character bars and its battery estimate. */
+/**
+ * One cell of the Your EQs grid: [art] (drawn in the content colour) beside a one-line name, at a
+ * fixed height so the grid stays even. Selection only changes colours, never the size.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun EqCard(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    onLongClick: (() -> Unit)? = null,
+    outlined: Boolean = false,
+    art: @Composable (Color) -> Unit,
+) {
+    val haptics = LocalHapticFeedback.current
+    val colors = MaterialTheme.colorScheme
+    val shape = RoundedCornerShape(12.dp)
+    val content = when {
+        selected -> colors.onSecondaryContainer
+        outlined -> colors.primary
+        else -> colors.onSurface
+    }
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .height(52.dp)
+            .clip(shape)
+            .background(
+                when {
+                    selected -> colors.secondaryContainer
+                    outlined -> Color.Transparent
+                    else -> colors.surfaceContainerHigh
+                },
+            )
+            .border(
+                if (selected) 2.dp else 1.dp,
+                when {
+                    selected -> colors.primary
+                    outlined -> colors.outlineVariant
+                    else -> Color.Transparent
+                },
+                shape,
+            )
+            .combinedClickable(
+                onClick = {
+                    if (!selected) haptics.performHapticFeedback(HapticFeedbackType.SegmentTick)
+                    onClick()
+                },
+                onLongClick = onLongClick?.let { { haptics.performHapticFeedback(HapticFeedbackType.LongPress); it() } },
+                onLongClickLabel = onLongClick?.let { "Rename or delete" },
+            )
+            .semantics { this.selected = selected }
+            .padding(horizontal = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.size(width = 28.dp, height = 20.dp), contentAlignment = Alignment.Center) { art(content) }
+        Spacer(Modifier.width(10.dp))
+        Text(label, style = MaterialTheme.typography.labelLarge, color = content, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+    }
+}
+
+/** Starts a new curve from flat; selected while an unsaved curve is playing. */
+@Composable
+private fun NewEqCard(selected: Boolean, onClick: () -> Unit) {
+    EqCard("New EQ", selected, onClick, outlined = true) { Icon(Icons.Default.Add, contentDescription = null, tint = it, modifier = Modifier.size(20.dp)) }
+}
+
+@Composable
+private fun EqSparkline(bands: List<Int>, color: Color, modifier: Modifier) {
+    Canvas(modifier) {
+        val span = (EqCurve.MAX_DB - EqCurve.MIN_DB).toFloat()
+        val path = eqPath(bands, { i -> i * size.width / (EqCurve.BANDS - 1) }, { db -> (EqCurve.MAX_DB - db) / span * size.height })
+        drawLine(color.copy(alpha = 0.3f), Offset(0f, size.height / 2), Offset(size.width, size.height / 2), 1.dp.toPx())
+        drawPath(path, color, style = Stroke(2.dp.toPx(), cap = StrokeCap.Round))
+    }
+}
+
+/** Each segment eases out of one point and into the next, so equal neighbours stay flat. */
+private fun eqPath(bands: List<Int>, x: (Int) -> Float, y: (Int) -> Float) = Path().apply {
+    moveTo(x(0), y(bands[0]))
+    for (i in 1 until EqCurve.BANDS) {
+        val mid = (x(i - 1) + x(i)) / 2
+        cubicTo(mid, y(bands[i - 1]), mid, y(bands[i]), x(i), y(bands[i]))
+    }
+}
+
+/** Description, the official app's bass/mid/treble character bars side by side, and its battery estimate. */
 @Composable
 private fun ProfileDetails(p: SoundProfile) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         p.description?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-        listOf("Bass" to p.bass, "Mid" to p.mid, "Treble" to p.treble).forEach { (label, value) ->
-            if (value != null) {
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(label, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    LinearProgressIndicator(progress = { value / 100f }, modifier = Modifier.fillMaxWidth(), drawStopIndicator = {})
+        val bars = listOf("Bass" to p.bass, "Mid" to p.mid, "Treble" to p.treble).filter { it.second != null }
+        if (bars.isNotEmpty()) {
+            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                bars.forEach { (label, value) ->
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        ControlLabel(label)
+                        LinearProgressIndicator(progress = { value!! / 100f }, modifier = Modifier.fillMaxWidth(), drawStopIndicator = {})
+                    }
                 }
             }
         }
@@ -281,16 +390,37 @@ private fun ProfileDetails(p: SoundProfile) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Default.Battery5Bar, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(6.dp))
-                HintText("Battery at max volume: ~$hours hrs")
+                HintText("About $hours hrs of battery at max volume")
             }
         }
     }
 }
 
+@Composable
+private fun TuneRoomRow(onClick: () -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+            .clickable(onClick = onClick)
+            .padding(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        IconBadge(Icons.Default.Mic, size = 40.dp, iconSize = 20.dp)
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text("Tune to this room", style = MaterialTheme.typography.titleSmall)
+            HintText("Measure with your phone and get an EQ that evens out the room.")
+        }
+        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
 /**
- * The six-band curve, bass on the left. Touch anywhere to grab the nearest band and drag it up or
- * down; every whole-dB change is sent straight to the speaker so it can be heard while editing.
- * Without [onChange] it only shows the curve.
+ * The six-band curve, bass on the left, with each band's gain underneath. Touch anywhere to grab
+ * the nearest band and drag it up or down; every whole-dB change is sent straight to the speaker
+ * so it can be heard while editing. Without [onChange] it only shows the curve.
  */
 @Composable
 internal fun EqGraph(bands: List<Int>, onChange: ((List<Int>) -> Unit)?) {
@@ -300,10 +430,11 @@ internal fun EqGraph(bands: List<Int>, onChange: ((List<Int>) -> Unit)?) {
     var active by remember { mutableStateOf<Int?>(null) }
     val colors = MaterialTheme.colorScheme
     val axisWidth = 44.dp
+    val inset = 12.dp
     val span = (EqCurve.MAX_DB - EqCurve.MIN_DB).toFloat()
 
     Column {
-        Row(Modifier.fillMaxWidth().height(240.dp)) {
+        Row(Modifier.fillMaxWidth().height(220.dp)) {
             // Labels sit on the +10, 0 and -10 grid lines, which the canvas insets by 12 dp.
             Column(Modifier.width(axisWidth).fillMaxHeight().padding(vertical = 4.dp), verticalArrangement = Arrangement.SpaceBetween) {
                 listOf("+10 dB", "0", "−10 dB").forEach { Text(it, style = MaterialTheme.typography.labelSmall, color = colors.onSurfaceVariant) }
@@ -311,11 +442,10 @@ internal fun EqGraph(bands: List<Int>, onChange: ((List<Int>) -> Unit)?) {
             Canvas(
                 Modifier
                     .weight(1f)
-                    .fillMaxWidth()
-                    .height(240.dp)
+                    .fillMaxHeight()
                     .semantics { contentDescription = "EQ curve: " + current.mapIndexed { i, db -> "band ${i + 1} ${dbLabel(db)}" }.joinToString(", ") }
                     .then(if (onChange == null) Modifier else Modifier.pointerInput(Unit) {
-                        val pad = 12.dp.toPx()
+                        val pad = inset.toPx()
                         fun xOf(i: Int) = pad + i * (size.width - 2 * pad) / (EqCurve.BANDS - 1)
                         fun dbAt(y: Float) = (EqCurve.MAX_DB - (y - pad) / (size.height - 2 * pad) * span).roundToInt().coerceIn(EqCurve.MIN_DB, EqCurve.MAX_DB)
                         awaitEachGesture {
@@ -343,7 +473,7 @@ internal fun EqGraph(bands: List<Int>, onChange: ((List<Int>) -> Unit)?) {
                         }
                     }),
             ) {
-                val pad = 12.dp.toPx()
+                val pad = inset.toPx()
                 val w = size.width - 2 * pad
                 val h = size.height - 2 * pad
                 fun x(i: Int) = pad + i * w / (EqCurve.BANDS - 1)
@@ -353,16 +483,12 @@ internal fun EqGraph(bands: List<Int>, onChange: ((List<Int>) -> Unit)?) {
                 for (db in EqCurve.MIN_DB..EqCurve.MAX_DB step 5) {
                     drawLine(colors.outlineVariant.copy(alpha = if (db == 0) 0.9f else 0.35f), Offset(pad, y(db)), Offset(pad + w, y(db)), 1.dp.toPx())
                 }
-                for (i in 0 until EqCurve.BANDS) drawLine(colors.outlineVariant.copy(alpha = 0.35f), Offset(x(i), pad), Offset(x(i), pad + h), 1.dp.toPx())
-
-                // Each segment eases out of one point and into the next, so equal neighbours stay flat.
-                val curve = Path().apply {
-                    moveTo(x(0), y(bands[0]))
-                    for (i in 1 until EqCurve.BANDS) {
-                        val mid = (x(i - 1) + x(i)) / 2
-                        cubicTo(mid, y(bands[i - 1]), mid, y(bands[i]), x(i), y(bands[i]))
-                    }
+                for (i in 0 until EqCurve.BANDS) {
+                    val color = if (active == i) colors.primary.copy(alpha = 0.6f) else colors.outlineVariant.copy(alpha = 0.35f)
+                    drawLine(color, Offset(x(i), pad), Offset(x(i), pad + h), 1.dp.toPx())
                 }
+
+                val curve = eqPath(bands, ::x, ::y)
                 val fill = Path().apply {
                     addPath(curve)
                     lineTo(x(EqCurve.BANDS - 1), zero)
@@ -374,14 +500,28 @@ internal fun EqGraph(bands: List<Int>, onChange: ((List<Int>) -> Unit)?) {
                 bands.forEachIndexed { i, db ->
                     val c = Offset(x(i), y(db))
                     if (active == i) drawCircle(colors.primary.copy(alpha = 0.25f), 20.dp.toPx(), c)
-                    drawCircle(colors.onSurface, 9.dp.toPx(), c)
+                    drawCircle(if (active == i) colors.primary else colors.onSurface, 9.dp.toPx(), c)
                 }
             }
         }
+        // Each band's gain, centred under its point.
+        BoxWithConstraints(Modifier.fillMaxWidth().padding(start = axisWidth).height(20.dp)) {
+            val step = (maxWidth - inset * 2) / (EqCurve.BANDS - 1)
+            val labelWidth = 40.dp
+            bands.forEachIndexed { i, db ->
+                Text(
+                    if (db > 0) "+$db" else "$db",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = if (active == i) FontWeight.Bold else null,
+                    color = if (active == i) colors.primary else colors.onSurface,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.width(labelWidth).offset(x = inset + step * i - labelWidth / 2),
+                )
+            }
+        }
         Row(Modifier.fillMaxWidth().padding(start = axisWidth)) {
-            Text("Bass", style = MaterialTheme.typography.labelMedium, color = colors.onSurfaceVariant, modifier = Modifier.weight(1f))
-            Text(active?.let { dbLabel(bands[it]) } ?: "Mid", style = MaterialTheme.typography.labelMedium, color = if (active != null) colors.primary else colors.onSurfaceVariant)
-            Text("Treble", style = MaterialTheme.typography.labelMedium, color = colors.onSurfaceVariant, modifier = Modifier.weight(1f), textAlign = TextAlign.End)
+            Text("Bass", style = MaterialTheme.typography.labelSmall, color = colors.onSurfaceVariant, modifier = Modifier.weight(1f))
+            Text("Treble", style = MaterialTheme.typography.labelSmall, color = colors.onSurfaceVariant)
         }
     }
 }
