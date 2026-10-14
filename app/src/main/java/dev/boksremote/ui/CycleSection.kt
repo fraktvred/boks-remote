@@ -84,6 +84,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import dev.boksremote.BoksApp
 import dev.boksremote.speaker.CycleConfig
+import dev.boksremote.speaker.CycleStatus
 import dev.boksremote.speaker.CycleTransition
 import dev.boksremote.speaker.LightPalette
 import dev.boksremote.speaker.SpeakerController
@@ -96,32 +97,37 @@ fun CycleSection(app: BoksApp, speaker: SpeakerController) {
     val status by cycle.status.collectAsState()
     val config by cycle.config.collectAsState()
     val saved by app.palettes.palettes.collectAsState()
-    val bridge by app.bridge.status.collectAsState()
+    val lent by cycle.lent.collectAsState()
     val palettes = remember(config, saved) { cycle.palettes() }
     var editing by remember { mutableStateOf(false) }
     // Ask once so the "cycling" notice is visible; start either way.
     val notifications = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { cycle.start(speaker) }
-    val canStart = palettes.size >= CycleConfig.MIN_PALETTES && !bridge.running
+    val canStart = remember(palettes, lent) { cycle.canStart() }
 
-    if (palettes.isNotEmpty()) CycleStrip(palettes, status.current.takeIf { status.showing }, paused = !status.running, enabled = !bridge.running) { cycle.jumpTo(speaker, it.name) }
+    if (palettes.isNotEmpty()) CycleStrip(palettes, status.current.takeIf { status.showing }, paused = !status.running, enabled = !lent) { cycle.jumpTo(speaker, it.name) }
     val every = CycleConfig.intervalLabel(config.intervalSeconds)
+    val s = status
     when {
-        bridge.running -> HintText("Paused while the DMX bridge runs.")
-        status.running -> {
-            val remaining by produceState(0L, status.nextAt) {
-                while (true) {
-                    value = (status.nextAt - SystemClock.elapsedRealtime()).coerceAtLeast(0) / 1000
-                    delay(250)
+        lent -> HintText("Paused while the DMX bridge runs.")
+        s is CycleStatus.Running -> {
+            val nextAt = s.nextAt
+            if (nextAt == null) Text("Starting…", style = MaterialTheme.typography.bodyMedium)
+            else {
+                val remaining by produceState(0L, nextAt) {
+                    while (true) {
+                        value = (nextAt - SystemClock.elapsedRealtime()).coerceAtLeast(0) / 1000
+                        delay(250)
+                    }
                 }
+                Text("Next: ${s.next} in ${clock(remaining)}", style = MaterialTheme.typography.bodyMedium)
             }
-            Text("Next: ${status.next} in ${clock(remaining)}", style = MaterialTheme.typography.bodyMedium)
         }
-        status.paused && status.showing -> {
-            val left = status.remainingMs?.let { " with ${clock(it / 1000)} left" }.orEmpty()
-            HintText("Paused on ${status.current}$left. Resume plays on from it.")
+        s is CycleStatus.Paused && s.onLight -> {
+            val left = s.remainingMs?.let { " with ${clock(it / 1000)} left" }.orEmpty()
+            HintText("Paused on ${s.current}$left. Resume plays on from it.")
         }
         // Paused by a palette picked by hand or by the bridge; either way it carries on where it was.
-        status.paused -> HintText("Paused. Resume carries on with ${status.next}.")
+        s is CycleStatus.Paused -> HintText("Paused. Resume carries on with ${s.next}.")
         palettes.size < CycleConfig.MIN_PALETTES -> HintText("Add at least two palettes to cycle through them.")
         else -> HintText("${palettes.size} palettes, every $every, ${if (config.shuffle) "shuffled" else "in order"}. Keeps going with the screen off.")
     }
@@ -159,7 +165,7 @@ fun CycleSection(app: BoksApp, speaker: SpeakerController) {
         CycleEditorSheet(
             config = config,
             inCycle = palettes,
-            available = (LightPalette.PRESETS + saved).filter { p -> palettes.none { it.name == p.name } },
+            available = app.palettes.all().filter { p -> palettes.none { it.name == p.name } },
             savedNames = saved.map { it.name }.toSet(),
             onChange = cycle::update,
             onDismiss = { editing = false },

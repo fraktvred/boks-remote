@@ -259,7 +259,7 @@ private fun Controls(s: SpeakerState, speaker: SpeakerController, app: BoksApp) 
     }
     s.brightness?.let { brightness ->
         // Moving the slider takes over from a running fade.
-        LevelCard("Brightness", Icons.Default.BrightnessMedium, brightness, { app.setBrightness(speaker, it) })
+        LevelCard("Brightness", Icons.Default.BrightnessMedium, brightness, app.session::setBrightness)
     }
     s.energyLevel?.let { level ->
         SectionCard("Light mode", Icons.Default.Lightbulb) { LightModePicker(level, speaker::setEnergyLevel) }

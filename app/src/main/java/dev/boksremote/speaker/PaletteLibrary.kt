@@ -1,20 +1,38 @@
 package dev.boksremote.speaker
 
-import android.content.Context
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlin.math.roundToInt
 
+/** What a palette on the light is to the user, as the palette card shows it. */
+enum class PaletteKind(val label: String) {
+    DEFAULT("Chosen by the light"),
+    PRESET("Preset"),
+    YOURS("Your palette"),
+    /** Sent by another app, or kept with "Use without saving": the app doesn't know it by name. */
+    UNSAVED("Not saved"),
+}
+
 /**
- * The user's own palettes ("Your palettes"), kept on this phone in creation order. Names are
- * unique across saved palettes and presets because the UI matches the light's active palette
- * by name: the HSV floats read back from the light don't round-trip exactly.
+ * Every palette the app knows by name: the presets, and the user's own ("Your palettes"), kept on
+ * this phone in creation order. Names are unique across both because palettes are matched by name:
+ * the light's active one (the HSV floats read back from it don't round-trip exactly), Cycle's and
+ * the scenes'. So a rename or delete here reaches everything that names the palette, through
+ * [register]ed [User]s, rather than each caller having to remember them.
  */
-class PaletteStore(context: Context) {
-    private val prefs = context.getSharedPreferences("palettes", Context.MODE_PRIVATE)
-    private val _palettes = MutableStateFlow(PaletteCodec.decode(prefs.getString(KEY, null).orEmpty()))
+class PaletteLibrary(private val kv: KeyValue) {
+    /** Something that refers to palettes by name, and follows them when they change. */
+    interface User {
+        fun renamed(old: String, new: String)
+        /** [name] is gone; returns how to put it back, under the name it is restored with. */
+        fun removed(name: String): (restored: String) -> Unit
+    }
+
+    private val users = mutableListOf<User>()
+    private val _palettes = MutableStateFlow(PaletteCodec.decode(kv[KEY].orEmpty()))
+    /** The user's own palettes. */
     val palettes: StateFlow<List<LightPalette>> = _palettes
-    private val _recentColors = MutableStateFlow(PaletteCodec.decodeColors(prefs.getString(KEY_RECENT, null).orEmpty()))
+    private val _recentColors = MutableStateFlow(PaletteCodec.decodeColors(kv[KEY_RECENT].orEmpty()))
     /** Colours from the palettes saved lately, newest first, for reuse in the editor. */
     val recentColors: StateFlow<List<HsvColor>> = _recentColors
 
@@ -22,6 +40,26 @@ class PaletteStore(context: Context) {
         // A preset added in an update may take a name the user already gave a palette; theirs gets a suffix.
         val unique = PaletteCodec.withUniqueNames(_palettes.value, RESERVED)
         if (unique != _palettes.value) write(unique)
+    }
+
+    fun register(user: User) {
+        users += user
+    }
+
+    /** Presets, then the user's own. */
+    fun all(): List<LightPalette> = LightPalette.PRESETS + _palettes.value
+
+    fun resolve(name: String): LightPalette? = all().firstOrNull { it.name == name }
+
+    /** The user's own palette called like [palette], if there is one. */
+    fun own(palette: LightPalette?): LightPalette? = palette?.let { p -> _palettes.value.firstOrNull { it.name == p.name } }
+
+    /** What [palette], as on the light, is; null means the light's default colours. */
+    fun kind(palette: LightPalette?): PaletteKind = when {
+        palette == null -> PaletteKind.DEFAULT
+        own(palette) != null -> PaletteKind.YOURS
+        LightPalette.PRESETS.any { it.name == palette.name } -> PaletteKind.PRESET
+        else -> PaletteKind.UNSAVED
     }
 
     /** Saves [colors] under [name] (made unique) and returns the stored palette. */
@@ -32,23 +70,31 @@ class PaletteStore(context: Context) {
         return palette
     }
 
-    /** Replaces [original] in place, keeping its spot in the list. */
+    /** Replaces [original] in place, keeping its spot in the list; a new name reaches every [User]. */
     fun update(original: LightPalette, name: String, colors: List<HsvColor>): LightPalette {
         val updated = LightPalette(uniqueName(name, except = original.name), colors)
         write(_palettes.value.map { if (it.name == original.name) updated else it })
         if (colors != original.colors) rememberColors(colors)
+        if (updated.name != original.name) users.forEach { it.renamed(original.name, updated.name) }
         return updated
     }
 
     fun rename(palette: LightPalette, name: String): LightPalette = update(palette, name, palette.colors)
 
-    fun delete(palette: LightPalette) = write(_palettes.value.filterNot { it.name == palette.name })
-
-    /** Undoes [delete]: puts [palette] back at [index], renamed if its name was taken meanwhile. */
-    fun restore(palette: LightPalette, index: Int): LightPalette {
-        val back = palette.copy(name = uniqueName(palette.name))
-        write(_palettes.value.toMutableList().apply { add(index.coerceIn(0, size), back) })
-        return back
+    /**
+     * Deletes [palette], and drops it wherever it is named, so a later one saved under its name joins
+     * nothing by accident. Returns the undo, which puts it all back in place.
+     */
+    fun delete(palette: LightPalette): () -> Unit {
+        val index = _palettes.value.indexOfFirst { it.name == palette.name }
+        write(_palettes.value.filterNot { it.name == palette.name })
+        val undos = users.map { it.removed(palette.name) }
+        return {
+            // Renamed if its name was taken meanwhile.
+            val back = palette.copy(name = uniqueName(palette.name))
+            write(_palettes.value.toMutableList().apply { add(index.coerceIn(0, size), back) })
+            undos.forEach { it(back.name) }
+        }
     }
 
     /** The name a new palette based on [wanted] would get, e.g. "Synthwave 2" for a copy of the preset. */
@@ -62,13 +108,13 @@ class PaletteStore(context: Context) {
 
     private fun write(list: List<LightPalette>) {
         _palettes.value = list
-        prefs.edit().putString(KEY, PaletteCodec.encode(list)).apply()
+        kv[KEY] = PaletteCodec.encode(list)
     }
 
     private fun rememberColors(colors: List<HsvColor>) {
         val recent = PaletteCodec.mergeRecent(colors, _recentColors.value, PaletteCodec.MAX_RECENT)
         _recentColors.value = recent
-        prefs.edit().putString(KEY_RECENT, PaletteCodec.encodeColors(recent)).apply()
+        kv[KEY_RECENT] = PaletteCodec.encodeColors(recent)
     }
 
     private companion object {

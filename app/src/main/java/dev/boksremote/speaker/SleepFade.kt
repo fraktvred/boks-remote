@@ -1,8 +1,5 @@
 package dev.boksremote.speaker
 
-import android.content.Context
-import android.os.PowerManager
-import android.os.SystemClock
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -14,7 +11,7 @@ import kotlinx.coroutines.launch
 data class SleepStatus(
     val running: Boolean = false,
     val minutes: Int = 0,
-    /** [SystemClock.elapsedRealtime] when the light switches off. */
+    /** [Clock] time when the light switches off. */
     val endsAt: Long = 0,
 )
 
@@ -23,27 +20,28 @@ data class SleepStatus(
  * switches the light off. Lives next to Cycle in [dev.boksremote.BoksApp] so it carries on with
  * the screen off; the brightness is a plain characteristic write, which the DMX bridge streams too.
  */
-class SleepFade(context: Context, private val scope: CoroutineScope) {
+class SleepFade(
+    private val scope: CoroutineScope,
+    private val clock: Clock = Clock.ELAPSED,
+    private val awake: KeepAwake = KeepAwake.NONE,
+) {
     private val _status = MutableStateFlow(SleepStatus())
     val status: StateFlow<SleepStatus> = _status
     private var job: Job? = null
-    private val wakeLock = context.getSystemService(PowerManager::class.java)
-        .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "BoksRemote:sleep")
-        .apply { setReferenceCounted(false) }
 
-    fun start(light: SpeakerController, minutes: Int) {
+    fun start(light: Light, minutes: Int) {
         job?.cancel()
         val total = minutes * 60_000L
-        val start = SystemClock.elapsedRealtime()
+        val start = clock.now()
         val from = light.state.value.brightness ?: 255
-        wakeLock.acquire(total + WAKE_MARGIN_MS)
+        awake.acquire(total + WAKE_MARGIN_MS)
         _status.value = SleepStatus(running = true, minutes = minutes, endsAt = start + total)
         job = scope.launch {
             while (true) {
-                if (SystemClock.elapsedRealtime() - start >= total) break
+                if (clock.now() - start >= total) break
                 // While the light is reconnecting it waits; the level then catches up with the clock.
                 light.state.first { it.connection == ConnectionState.CONNECTED }
-                val level = levelAt(from, SystemClock.elapsedRealtime() - start, total)
+                val level = levelAt(from, clock.now() - start, total)
                 if (level != light.state.value.brightness) light.setBrightness(level)
                 delay(STEP_MS)
             }
@@ -62,7 +60,7 @@ class SleepFade(context: Context, private val scope: CoroutineScope) {
 
     private fun finish() {
         job = null
-        if (wakeLock.isHeld) wakeLock.release()
+        awake.release()
         _status.value = SleepStatus()
     }
 

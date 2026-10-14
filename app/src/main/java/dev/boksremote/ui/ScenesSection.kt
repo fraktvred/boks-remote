@@ -152,16 +152,16 @@ private fun ReorderableScenes(scenes: List<Scene>, onMove: (from: Int, to: Int) 
 @Composable
 fun ScenesSection(s: SpeakerState, app: BoksApp, colours: @Composable () -> Unit) {
     val scenes by app.scenes.scenes.collectAsState()
-    val activeName by app.activeScene.collectAsState()
-    val live by app.activeSceneLive.collectAsState()
+    val activeName by app.session.active.collectAsState()
+    val live by app.session.live.collectAsState()
     val cycle by app.cycle.status.collectAsState()
     var browsing by remember { mutableStateOf(false) }
     var naming by remember { mutableStateOf(false) }
     var renaming by remember { mutableStateOf<Scene?>(null) }
     val canSave = s.brightness != null && s.energyLevel != null
     // The scene in use follows Cycle, so its Cycle is the one running.
-    fun playing(scene: Scene) = if (scene.name == activeName && cycle.running) cycle else null
-    fun position(scene: Scene) = if (playing(scene) != null) app.cycle.palettes().indexOfFirst { it.name == cycle.current } + 1 else 0
+    fun playing(scene: Scene) = (cycle as? CycleStatus.Running)?.takeIf { scene.name == activeName }
+    fun position(scene: Scene) = if (playing(scene) != null) app.cycle.position() else 0
     val active = scenes.firstOrNull { it.name == activeName }
     // The light as it is now, rather than as last saved, so a change or a Cycle step shows at once.
     val shown = active?.let { live?.takeIf { it.name == active.name } ?: active }
@@ -199,9 +199,9 @@ fun ScenesSection(s: SpeakerState, app: BoksApp, colours: @Composable () -> Unit
             playing = ::playing,
             position = ::position,
             canSave = canSave,
-            onApply = { app.applyScene(it); browsing = false },
+            onApply = { app.session.apply(it); browsing = false },
             onRename = { renaming = it },
-            onDelete = app::deleteScene,
+            onDelete = app.session::delete,
             onMove = app.scenes::move,
             onSaveNew = { naming = true },
             onDismiss = { browsing = false },
@@ -209,13 +209,13 @@ fun ScenesSection(s: SpeakerState, app: BoksApp, colours: @Composable () -> Unit
     }
     if (naming) {
         PaletteNameDialog(if (active == null) "Save as scene" else "New scene", app.scenes.suggestName(), "Save", placeholder = "Scene", onDismiss = { naming = false }) { name ->
-            app.saveScene(name)
+            app.session.save(name)
             naming = false
         }
     }
     renaming?.let { scene ->
         PaletteNameDialog("Rename scene", scene.name, "Rename", placeholder = "Scene", onDismiss = { renaming = null }) { name ->
-            app.renameScene(scene, name)
+            app.session.rename(scene, name)
             renaming = null
         }
     }
@@ -235,7 +235,7 @@ private fun SaveSceneButton(enabled: Boolean, onClick: () -> Unit) {
  * An active scene is shown as a cover: its palette fills the row, dimmed behind the text.
  */
 @Composable
-private fun SceneCover(active: Scene?, playing: CycleStatus?, position: Int, count: Int, onClick: () -> Unit, save: @Composable () -> Unit) {
+private fun SceneCover(active: Scene?, playing: CycleStatus.Running?, position: Int, count: Int, onClick: () -> Unit, save: @Composable () -> Unit) {
     val cover = active != null
     Box(Modifier.fillMaxWidth().height(IntrinsicSize.Min).clickable(onClickLabel = "Browse scenes", onClick = onClick)) {
         if (active != null) {
@@ -261,7 +261,7 @@ private fun SceneCover(active: Scene?, playing: CycleStatus?, position: Int, cou
                 )
             }
             save()
-            if (playing != null) Countdown(playing.nextAt, tint = if (cover) Color.White else MaterialTheme.colorScheme.primary)
+            playing?.nextAt?.let { Countdown(it, tint = if (cover) Color.White else MaterialTheme.colorScheme.primary) }
             Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = subtle)
         }
     }
@@ -272,7 +272,7 @@ private fun SceneCover(active: Scene?, playing: CycleStatus?, position: Int, cou
 @Composable
 private fun ScenesSheet(
     scenes: List<Scene>,
-    playing: (Scene) -> CycleStatus?,
+    playing: (Scene) -> CycleStatus.Running?,
     position: (Scene) -> Int,
     canSave: Boolean,
     onApply: (Scene) -> Unit,
@@ -311,7 +311,7 @@ private fun ScenesSheet(
 }
 
 /** A scene's look, or while its Cycle plays, its light mode, the palette on and its place in the cycle. */
-private fun sceneStatus(scene: Scene, playing: CycleStatus?, position: Int): String {
+private fun sceneStatus(scene: Scene, playing: CycleStatus.Running?, position: Int): String {
     val count = scene.cycle?.config?.names?.size ?: 0
     return when {
         // The countdown beside it has the Cycle icon, so the word itself makes way for the light mode.
@@ -345,7 +345,7 @@ private fun Countdown(nextAt: Long, tint: Color = MaterialTheme.colorScheme.prim
 @Composable
 private fun SceneRow(
     scene: Scene,
-    playing: CycleStatus?,
+    playing: CycleStatus.Running?,
     position: Int,
     handle: Modifier?,
     onApply: () -> Unit,
@@ -389,7 +389,7 @@ private fun SceneRow(
                 overflow = TextOverflow.Ellipsis,
             )
         }
-        if (playing != null) Countdown(playing.nextAt)
+        playing?.nextAt?.let { Countdown(it) }
         Box {
             IconButton(onClick = { menu = true }) { Icon(Icons.Default.MoreVert, contentDescription = "More for ${scene.name}") }
             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {

@@ -35,7 +35,8 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.runtime.collectAsState
 import androidx.compose.foundation.layout.width
 import dev.boksremote.speaker.PaletteCycle
-import dev.boksremote.speaker.PaletteStore
+import dev.boksremote.speaker.PaletteKind
+import dev.boksremote.speaker.PaletteLibrary
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -70,7 +71,7 @@ import dev.boksremote.speaker.SpeakerController
 import dev.boksremote.speaker.SpeakerState
 
 @Composable
-fun PaletteSection(s: SpeakerState, speaker: SpeakerController, store: PaletteStore, cycle: PaletteCycle) {
+fun PaletteSection(s: SpeakerState, speaker: SpeakerController, store: PaletteLibrary, cycle: PaletteCycle) {
     val saved by store.palettes.collectAsState()
     val recent by store.recentColors.collectAsState()
     // Null while the light runs its default colours: it picks them itself, so a neutral stand-in is shown.
@@ -78,22 +79,16 @@ fun PaletteSection(s: SpeakerState, speaker: SpeakerController, store: PaletteSt
     val shown = current?.colors ?: DEFAULT_ART
     var browsing by remember { mutableStateOf(false) }
     var draft by remember { mutableStateOf<PaletteDraft?>(null) }
-    // A palette the app doesn't know by name (sent by another app, or kept with "Use without saving").
-    val unsaved = current != null && LightPalette.PRESETS.none { it.name == current.name } && saved.none { it.name == current.name }
+    val kind = remember(current, saved) { store.kind(current) }
+    val unsaved = kind == PaletteKind.UNSAVED
 
     /** Opens the editor on the light's palette: in place if it is one of the user's, otherwise as a new copy. */
     fun editCurrent(swatch: Int) {
-        val own = current?.let { c -> saved.firstOrNull { it.name == c.name } }
+        val own = store.own(current)
         draft = own?.let { PaletteDraft(it, it.name, it.colors, swatch) }
             ?: PaletteDraft(null, store.suggestName(current?.name?.takeIf { it != "Custom" } ?: "My palette"), shown, swatch)
     }
 
-    val status = when {
-        current == null -> "Chosen by the light"
-        unsaved -> "Not saved"
-        LightPalette.PRESETS.any { it.name == current.name } -> "Preset"
-        else -> "Your palette"
-    }
     Row(
         Modifier
             .fillMaxWidth()
@@ -103,7 +98,7 @@ fun PaletteSection(s: SpeakerState, speaker: SpeakerController, store: PaletteSt
     ) {
         Column(Modifier.weight(1f)) {
             Text(current?.name ?: "Lightboks default", style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(status, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(kind.label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         if (unsaved) {
             TextButton(onClick = { editCurrent(0) }) {
@@ -123,40 +118,29 @@ fun PaletteSection(s: SpeakerState, speaker: SpeakerController, store: PaletteSt
             activeIsDefault = s.paletteIsDefault,
             saved = saved,
             // A palette picked by hand wins over Cycle, which then waits for Resume.
-            onApply = { cycle.pause(); speaker.setPalette(it) },
-            onResetDefault = { cycle.pause(); speaker.resetPalette() },
+            onApply = { cycle.showByHand(speaker, it) },
+            onResetDefault = { cycle.showByHand(speaker, null) },
             onNew = { draft = PaletteDraft(null, store.suggestName("My palette"), shown) },
             onEdit = { draft = PaletteDraft(it, it.name, it.colors) },
             onDuplicate = { draft = PaletteDraft(null, store.suggestName(it.name), it.colors) },
             onRename = { p, name ->
                 val renamed = store.rename(p, name)
-                cycle.rename(p.name, renamed.name)
-                if (current?.name == p.name) speaker.setPalette(renamed)
+                if (current?.name == p.name) cycle.updateShown(speaker, renamed)
             },
-            onDelete = { p ->
-                val index = saved.indexOf(p)
-                val cycleIndex = cycle.config.value.names.indexOf(p.name)
-                store.delete(p)
-                cycle.remove(p.name)
-                val undo = {
-                    val back = store.restore(p, index)
-                    if (cycleIndex >= 0) cycle.restore(back.name, cycleIndex)
-                }
-                undo
-            },
+            onDelete = store::delete,
             onDismiss = { browsing = false },
         )
     }
     draft?.let { d ->
-        val session = remember(d) { PreviewSession(speaker, cycle, current) }
+        val session = remember(d) { cycle.preview(speaker) }
         PaletteEditorSheet(
             draft = d,
             onLight = current?.colors,
             recentColors = recent,
             onPreview = session::show,
-            onPreviewOff = session::restore,
+            onPreviewOff = session::cancel,
             onSave = { name, colors, preview ->
-                val p = d.original?.let { o -> store.update(o, name, colors).also { cycle.rename(o.name, it.name) } }
+                val p = d.original?.let { o -> store.update(o, name, colors) }
                     ?: store.add(name, colors)
                 // Sent under its saved name, so the light, and this screen after a reconnect, know it by that name.
                 when {
@@ -166,7 +150,7 @@ fun PaletteSection(s: SpeakerState, speaker: SpeakerController, store: PaletteSt
                 draft = null
             },
             onApplyOnce = { session.keep(LightPalette("Custom", it)); draft = null },
-            onCancel = { session.restore(); draft = null },
+            onCancel = { session.cancel(); draft = null },
         )
     }
 }
@@ -204,45 +188,6 @@ private fun SwatchStrip(colors: List<HsvColor>, onEdit: (Int) -> Unit, modifier:
             }
         }
     }
-}
-
-/** The light's side of one editor session: a preview pauses Cycle, and cancelling puts back what was showing. */
-private class PreviewSession(
-    private val speaker: SpeakerController,
-    private val cycle: PaletteCycle,
-    /** Null when the light ran its default colours. */
-    private val before: LightPalette?,
-) {
-    private val cycleWasRunning = cycle.status.value.running
-    private var previewing = false
-
-    fun show(colors: List<HsvColor>) {
-        if (!previewing) {
-            previewing = true
-            cycle.pause()
-        }
-        speaker.setPalette(LightPalette("Custom", colors))
-    }
-
-    /** Undoes the preview; if Cycle was running it simply carries on instead. */
-    fun restore() {
-        if (!previewing) return
-        previewing = false
-        when {
-            cycleWasRunning -> cycle.start(speaker)
-            before != null -> speaker.setPalette(before)
-            else -> speaker.resetPalette()
-        }
-    }
-
-    /** Leaves [p] on the light: a palette picked by hand, so Cycle stays paused. */
-    fun keep(p: LightPalette) {
-        cycle.pause()
-        speaker.setPalette(p)
-    }
-
-    /** New colours for the palette the light already shows; Cycle, if running, isn't interrupted. */
-    fun refresh(p: LightPalette) = speaker.setPalette(p)
 }
 
 /**

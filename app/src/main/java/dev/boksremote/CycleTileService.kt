@@ -5,7 +5,6 @@ import android.service.quicksettings.Tile
 import android.service.quicksettings.TileService
 import dev.boksremote.protocol.Family
 import dev.boksremote.speaker.ConnectionState
-import dev.boksremote.speaker.CycleConfig
 import dev.boksremote.speaker.SpeakerController
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
@@ -15,7 +14,7 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 
 /**
- * Quick Settings tile that starts and stops Cycle without opening the app. It acts on the Lightboks
+ * Quick Settings tile that pauses and resumes Cycle without opening the app. It acts on the Lightboks
  * the app is connected to, so it is unavailable while there is none (the connection lives in the app's
  * process, which a tile alone can't bring back).
  */
@@ -59,10 +58,7 @@ class CycleTileService : TileService() {
     override fun onClick() {
         val light: SpeakerController = app.speaker.value ?: return
         val cycle = app.cycle
-        when {
-            cycle.status.value.running -> cycle.stop()
-            app.bridge.status.value.running -> return
-            cycle.palettes().size >= CycleConfig.MIN_PALETTES -> cycle.start(light)
-        }
+        // Like the screen's Pause and Resume: the palette stays on, and a second tap plays on from it.
+        if (cycle.status.value.running) cycle.hold() else cycle.start(light)
     }
 }

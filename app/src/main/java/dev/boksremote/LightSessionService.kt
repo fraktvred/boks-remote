@@ -32,9 +32,7 @@ class LightSessionService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val app = application as BoksApp
         if (intent?.action == ACTION_STOP) {
-            app.stopBridge()
-            app.cycle.stop()
-            app.sleep.stop()
+            app.stopLightSession()
             return START_NOT_STICKY
         }
         val nm = getSystemService(NotificationManager::class.java)

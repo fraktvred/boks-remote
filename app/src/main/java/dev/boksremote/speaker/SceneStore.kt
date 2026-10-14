@@ -1,6 +1,5 @@
 package dev.boksremote.speaker
 
-import android.content.Context
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
@@ -19,10 +18,12 @@ data class Scene(
     val cycle: CycleSnapshot? = null,
 )
 
-/** The user's scenes, on this phone, in the order they were saved. */
-class SceneStore(context: Context) {
-    private val prefs = context.getSharedPreferences("scenes", Context.MODE_PRIVATE)
-    private val _scenes = MutableStateFlow(SceneCodec.decode(prefs.getString(KEY, null).orEmpty()))
+/**
+ * The user's scenes, on this phone, in the order they were saved. A palette renamed or deleted in the
+ * [PaletteLibrary] is followed in every scene's Cycle, and in the palette a scene shows.
+ */
+class SceneStore(private val kv: KeyValue) : PaletteLibrary.User {
+    private val _scenes = MutableStateFlow(SceneCodec.decode(kv[KEY].orEmpty()))
     val scenes: StateFlow<List<Scene>> = _scenes
 
     fun add(scene: Scene): Scene {
@@ -46,8 +47,34 @@ class SceneStore(context: Context) {
 
     /** The scene in use, by name, kept across app restarts. */
     var active: String?
-        get() = prefs.getString(KEY_ACTIVE, null)
-        set(value) = prefs.edit().putString(KEY_ACTIVE, value).apply()
+        get() = kv[KEY_ACTIVE]
+        set(value) { kv[KEY_ACTIVE] = value }
+
+    override fun renamed(old: String, new: String) = write(
+        _scenes.value.map { s ->
+            fun renamed(name: String?) = if (name == old) new else name
+            s.copy(
+                palette = s.palette?.let { it.copy(name = renamed(it.name)!!) },
+                cycle = s.cycle?.let { c -> c.copy(config = c.config.copy(names = c.config.names.map { renamed(it)!! }), current = renamed(c.current)) },
+            )
+        },
+    )
+
+    /** Drops [name] from every scene's Cycle; the undo puts it back in each at its old place. */
+    override fun removed(name: String): (String) -> Unit {
+        val places = _scenes.value.associate { it.name to (it.cycle?.config?.names?.indexOf(name) ?: -1) }.filterValues { it >= 0 }
+        if (places.isEmpty()) return {}
+        write(_scenes.value.map { s -> s.withCycleNames { it - name } })
+        return { back ->
+            write(_scenes.value.map { s ->
+                val index = places[s.name] ?: return@map s
+                s.withCycleNames { names -> if (back in names) names else names.toMutableList().apply { add(index.coerceIn(0, size), back) } }
+            })
+        }
+    }
+
+    private fun Scene.withCycleNames(change: (List<String>) -> List<String>) =
+        copy(cycle = cycle?.let { c -> c.copy(config = c.config.copy(names = change(c.config.names))) })
 
     private fun uniqueName(wanted: String, except: String? = null): String {
         val base = PaletteCodec.sanitize(wanted).ifBlank { "Scene" }
@@ -56,7 +83,7 @@ class SceneStore(context: Context) {
 
     private fun write(list: List<Scene>) {
         _scenes.value = list
-        prefs.edit().putString(KEY, SceneCodec.encode(list)).apply()
+        kv[KEY] = SceneCodec.encode(list)
     }
 
     private companion object {
@@ -69,20 +96,19 @@ class SceneStore(context: Context) {
  * One scene per line, in fields split by `|`:
  * `name|brightness|level|palette name|h,s,v|h,s,v|h,s,v|h,s,v|interval|shuffle|cycle names|running|current|ms left|transition`.
  * The palette fields are empty for the default colours and the cycle fields when there is no cycle, as
- * are current and ms left when unknown. Cycle names are split by [NAME_SEPARATOR], since palette names
- * may hold anything but `|` and newlines. Earlier lines still read: 3 or 8 fields without a cycle, 11
+ * are current and ms left when unknown. The cycle's settings are kept as [CycleConfigCodec] keeps them,
+ * in the same order with the transition moved to the end. Earlier lines still read: 3 or 8 fields without a cycle, 11
  * with one saved only while it ran, 12 without where it was, and 14 without the transition, which
  * takes the default.
  */
 object SceneCodec {
-    private const val NAME_SEPARATOR = '\u001F'
     private const val FIELDS = 15
 
     fun encode(list: List<Scene>): String = list.joinToString("\n") { s ->
         val palette = s.palette?.let { PaletteCodec.encode(listOf(it)) } ?: "|".repeat(LightPalette.SIZE)
         val cycle = s.cycle?.let { c ->
-            val cfg = c.config
-            "${cfg.intervalSeconds}|${cfg.shuffle}|${cfg.names.joinToString(NAME_SEPARATOR.toString())}|${c.running}|${c.current.orEmpty()}|${c.remainingMs ?: ""}|${cfg.transition.name}"
+            val (interval, shuffle, names, transition) = CycleConfigCodec.fields(c.config)
+            "$interval|$shuffle|$names|${c.running}|${c.current.orEmpty()}|${c.remainingMs ?: ""}|$transition"
         } ?: "||||||"
         "${PaletteCodec.sanitize(s.name)}|${s.brightness}|${s.level.name}|$palette|$cycle"
     }
@@ -97,9 +123,7 @@ object SceneCodec {
             PaletteCodec.decode(parts.subList(3, 8).joinToString("|")).singleOrNull() ?: return@mapNotNull null
         } else null
         val cycle = if (parts.size >= 11 && parts[8].isNotEmpty()) {
-            val interval = parts[8].toIntOrNull()?.takeIf { it in CycleConfig.INTERVALS } ?: return@mapNotNull null
-            val transition = CycleTransition.entries.firstOrNull { it.name == parts.getOrNull(14) } ?: CycleConfig().transition
-            val config = CycleConfig(parts[10].split(NAME_SEPARATOR).filter { it.isNotEmpty() }, interval, parts[9].toBoolean(), transition)
+            val config = CycleConfigCodec.parse(parts[8], parts[9], parts[10], parts.getOrNull(14)) ?: return@mapNotNull null
             // 11-field lines only kept a cycle that was running.
             val running = parts.size == 11 || parts[11].toBoolean()
             val current = parts.getOrNull(12)?.ifEmpty { null }

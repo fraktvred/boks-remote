@@ -2,7 +2,6 @@ package dev.boksremote.speaker
 
 import android.bluetooth.BluetoothDevice
 import android.content.Context
-import android.os.SystemClock
 import android.util.Log
 import dev.boksremote.ble.GattConnection
 import dev.boksremote.proto.proto
@@ -19,8 +18,6 @@ import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -78,12 +75,12 @@ class SpeakerController(
     private val advert: Advertisement?,
     private val scope: CoroutineScope,
     private val pincodes: PincodeStore,
-) {
+) : Light {
     private val address = device.address
     private val gatt = GattConnection(context, device)
     private var rpc: RpcClient? = null
     private val _state = MutableStateFlow(SpeakerState(family = advert?.family, model = advert?.model, name = advert?.name, firmware = advert?.firmware))
-    val state: StateFlow<SpeakerState> = _state
+    override val state: StateFlow<SpeakerState> = _state
 
     // Slider drags produce many values; only the latest matters, so a conflated channel drops stale ones.
     private val volumeWrites = Channel<Int>(Channel.CONFLATED)
@@ -94,6 +91,13 @@ class SpeakerController(
     private val jobs = mutableListOf<Job>()
 
     private val family get() = _state.value.family
+
+    private val link = object : LightLink {
+        override suspend fun call(service: String, method: String, request: ByteArray) = requireRpc().call(service, method, request)
+        override suspend fun write(characteristic: UUID, value: ByteArray) = gatt.write(characteristic, value)
+    }
+    /** The light's content: palette, mode and effects. Only a Lightboks has any. */
+    val lightboks = Lightboks(link, _state, scope, ::report)
 
     fun connect() {
         // Reconnect reuses this controller, so drop the previous session's collectors first.
@@ -123,9 +127,9 @@ class SpeakerController(
         }
         jobs += scope.launch { for (v in volumeWrites) attempt("volume") { writeVolume(v) } }
         jobs += scope.launch {
-            for (id in fxWrites) attempt("effect") { applyFx(id) }
+            for (id in fxWrites) attempt("effect") { lightboks.applyFx(id) }
         }
-        jobs += scope.launch { for (v in brightnessWrites) attempt("brightness") { applyBrightness(v) } }
+        jobs += scope.launch { for (v in brightnessWrites) attempt("brightness") { lightboks.applyBrightness(v) } }
         jobs += scope.launch { for (w in eqWrites) attempt("EQ") { if (w.bands != null) writeCustomEq(w.bands) else writeEqMode(w.mode) } }
     }
 
@@ -358,79 +362,24 @@ class SpeakerController(
         gatt.write(c, byteArrayOf(v.toByte()))
     }
 
-    fun setBrightness(value: Int) {
+    override fun setBrightness(value: Int) {
         val v = value.coerceIn(0, 255)
         _state.update { it.copy(brightness = v) }
         brightnessWrites.trySend(v)
     }
 
-    /**
-     * Mirrors the official app's order: Uplight starts the built-in program and then reports level 3;
-     * the other modes write their level and then clear any program (an energy-level write of 3 alone is rejected).
-     */
-    fun setEnergyLevel(level: EnergyLevel) = control("light mode") { applyEnergyLevel(level) }
-
-    // --- suspend forms of the light controls, for callers that pace their own writes (the DMX bridge) ---
-
-    suspend fun applyBrightness(value: Int) {
-        val v = value.coerceIn(0, 255)
-        gatt.write(Uuids.LIGHT_BRIGHTNESS, byteArrayOf(v.toByte()))
-        _state.update { it.copy(brightness = v) }
+    override fun setEnergyLevel(level: EnergyLevel) {
+        control("light mode") { lightboks.applyEnergyLevel(level) }
     }
 
-    /**
-     * One light-content write at a time, in the order they were made. A light mode change is two
-     * writes, and a palette landing between them doesn't show until the next mode change.
-     */
-    private val lightContent = Mutex()
-
-    suspend fun applyEnergyLevel(level: EnergyLevel) = lightContent.withLock {
-        val rpc = requireRpc()
-        if (level == EnergyLevel.CUSTOM) {
-            checkLightStatus(rpc.call("LightContentService", "SetCustomProgram", LightContentCodec.customProgramRequest(UPLIGHT_PROGRAM)))
-            gatt.write(Uuids.LIGHT_ENERGY_LEVEL, byteArrayOf(level.ordinal.toByte()))
-        } else {
-            gatt.write(Uuids.LIGHT_ENERGY_LEVEL, byteArrayOf(level.ordinal.toByte()))
-            // Older light firmware has no custom programs; the level change already took effect.
-            attemptQuietly { rpc.call("LightContentService", "SetCustomProgram", LightContentCodec.customProgramRequest(LightContentCodec.NO_ID)) }
-        }
-        _state.update { it.copy(energyLevel = level) }
+    override fun setPalette(palette: LightPalette) {
+        control("palette") { lightboks.applyPalette(palette) }
     }
 
-    /** Sends a palette. A fresh id each time, so the light never keeps a cached copy of an earlier edit. */
-    fun setPalette(palette: LightPalette) = control("palette") { applyPalette(palette, UUID.randomUUID()) }
+    override suspend fun fadePalette(from: LightPalette, to: LightPalette, durationMs: Long) = lightboks.fadePalette(from, to, durationMs)
 
-    suspend fun applyPalette(palette: LightPalette, id: UUID) = lightContent.withLock {
-        requireRpc().call("LightContentService", "SetActivePalette", LightContentCodec.palette(palette, id))
-        _state.update { it.copy(palette = palette, paletteIsDefault = false) }
-    }
-
-    /**
-     * Blends [from] into [to] over [durationMs] in [FADE_STEPS] evenly spaced writes, the last of them
-     * [to] itself. The steps before it alternate between two fixed ids, like the DMX bridge's, so a fade
-     * doesn't leave a stored palette per step; [to] goes out like any other palette. A step that fails
-     * is skipped.
-     */
-    suspend fun fadePalette(from: LightPalette, to: LightPalette, durationMs: Long) {
-        val start = SystemClock.elapsedRealtime()
-        for (step in 1 until FADE_STEPS) {
-            attemptQuietly { applyPalette(from.blend(to, step.toFloat() / FADE_STEPS), if (step % 2 == 0) FADE_ID_A else FADE_ID_B) }
-            delay((start + durationMs * step / (FADE_STEPS - 1) - SystemClock.elapsedRealtime()).coerceAtLeast(0))
-        }
-        attempt("palette") { applyPalette(to, UUID.randomUUID()) }
-    }
-
-    /** Starts a built-in animation; [LightContentCodec.NO_ID] stops it. */
-    suspend fun applyFx(id: UUID) = lightContent.withLock {
-        checkLightStatus(requireRpc().call("LightContentService", "SetAnimation", LightContentCodec.animationRequest(id)))
-    }
-
-    fun resetPalette() = control("palette") {
-        // The firmware ignores SetActivePalette with AUTO control; the official app uses this dedicated call.
-        lightContent.withLock {
-            requireRpc().call("LightContentService", "ResetActiveColorPalette")
-            _state.update { it.copy(palette = null, paletteIsDefault = true) }
-        }
+    override fun resetPalette() {
+        control("palette") { lightboks.resetPalette() }
     }
 
     /** FX pad: an animation plays while held; [fx] null releases it. Latest press wins. */
@@ -438,44 +387,9 @@ class SpeakerController(
         fxWrites.trySend(fx?.id ?: LightContentCodec.NO_ID)
     }
 
-    private var dropJob: Job? = null
-    /** True while the Drop pad holds or plays, when brightness and effect are only borrowed. */
-    val dropping: Boolean get() = dropJob?.isActive == true
-    /** The brightness to return to after a drop; kept when a new drop cuts the last one short. */
-    private var dropReturn: Int? = null
+    override val dropping: Boolean get() = lightboks.dropping
 
-    /**
-     * Drop pad: blackout while held, the silence before the drop; on release a short strobe at full
-     * brightness, then the effect stops and the brightness goes back to what it was.
-     */
-    fun holdDrop(held: Boolean) {
-        val previous = dropJob
-        if (held) {
-            // A new press cuts the last drop short.
-            previous?.cancel()
-            dropJob = scope.launch { attempt("drop") { applyFx(LightFx.BLACKOUT.id) } }
-            return
-        }
-        dropJob = scope.launch {
-            // In order after the blackout, even for a quick tap.
-            previous?.join()
-            val before = dropReturn ?: _state.value.brightness
-            dropReturn = before
-            attempt("drop") {
-                applyFx(LightFx.STROBE.id)
-                if (before != null) applyBrightness(255)
-                delay(DROP_MS)
-                applyFx(LightContentCodec.NO_ID)
-                if (before != null) applyBrightness(before)
-            }
-            dropReturn = null
-        }
-    }
-
-    private fun checkLightStatus(response: dev.boksremote.proto.ProtoMessage) {
-        val status = response.int(1)
-        if (status != 0) throw IllegalStateException("light rejected the request (status $status)")
-    }
+    fun holdDrop(held: Boolean) = lightboks.holdDrop(held)
 
     fun setStereoRole(role: StereoRole) = control("stereo role") {
         gatt.write(if (family == Family.LEGACY) Uuids.LEGACY_STEREO_ROLE else Uuids.STEREO_ROLE, byteArrayOf(role.ordinal.toByte()))
@@ -567,9 +481,11 @@ class SpeakerController(
         attemptQuietly { rpc.call("SystemService", "PowerOff", proto { int32(1, 1) }, timeoutMs = 3_000) }
     }
 
-    fun powerOff() = control("power off") {
-        if (family == Family.LEGACY) gatt.write(Uuids.LEGACY_POWER_MODE, byteArrayOf(0))
-        else gatt.write(Uuids.SYSTEM_POWER, byteArrayOf(0, 0)) // [OFF, no reboot]
+    override fun powerOff() {
+        control("power off") {
+            if (family == Family.LEGACY) gatt.write(Uuids.LEGACY_POWER_MODE, byteArrayOf(0))
+            else gatt.write(Uuids.SYSTEM_POWER, byteArrayOf(0, 0)) // [OFF, no reboot]
+        }
     }
 
     fun clearMessage() = _state.update { it.copy(message = null) }
@@ -580,23 +496,25 @@ class SpeakerController(
 
     private fun control(what: String, block: suspend () -> Unit) = scope.launch { attempt(what, block) }
 
-    private suspend fun attempt(what: String, block: suspend () -> Unit) {
+    private suspend fun attempt(what: String?, block: suspend () -> Unit) {
         try {
             block()
         } catch (e: Exception) {
             currentCoroutineContext().ensureActive() // a cancelled session isn't a failed control
-            Log.w(TAG, "$what failed", e)
-            _state.update { it.copy(message = "Couldn't change $what: ${e.message}") }
+            report(what, e)
         }
     }
 
-    private suspend fun attemptQuietly(block: suspend () -> Unit) {
-        try {
-            block()
-        } catch (e: Exception) {
-            currentCoroutineContext().ensureActive()
+    private suspend fun attemptQuietly(block: suspend () -> Unit) = attempt(null, block)
+
+    /** A failed control, or with [what] null an optional step older firmware may lack. */
+    private fun report(what: String?, e: Exception) {
+        if (what == null) {
             Log.d(TAG, "optional step failed: ${e.message}")
+            return
         }
+        Log.w(TAG, "$what failed", e)
+        _state.update { it.copy(message = "Couldn't change $what: ${e.message}") }
     }
 
     private suspend fun readByte(c: UUID): Int? {
@@ -613,17 +531,6 @@ class SpeakerController(
         private const val TAG = "SpeakerController"
         /** About 30 %, a safe level to unmute to when the previous one is unknown. */
         private const val UNMUTE_DEFAULT = 77
-        private const val DROP_MS = 2_000L
-
-        // Program ids built into the Lightboks firmware, as used by the official app.
-        /**
-         * Each palette sent may cost the light a flash write (see DmxBridge); fewer than this and a fade
-         * shows its steps. 12 over 3 s is one every ~270 ms, about the DMX bridge's own limit.
-         */
-        const val FADE_STEPS = 12
-        private val FADE_ID_A: UUID = UUID.fromString("b0c5d3a0-0d1e-4f7a-9c11-000000000fa0")
-        private val FADE_ID_B: UUID = UUID.fromString("b0c5d3a0-0d1e-4f7a-9c11-000000000fa1")
-        private val UPLIGHT_PROGRAM: UUID = UUID.fromString("303c4ee1-e178-4f2f-bc18-6b3f4f682825")
 
         fun bifrostInputs(mask: Int) = listOf(1 to "Bluetooth", 2 to "Team-up", 4 to "AUX", 8 to "XLR 1", 16 to "XLR 2")
             .filter { mask and it.first != 0 }.map { it.second }
