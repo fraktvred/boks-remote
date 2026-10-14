@@ -37,6 +37,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Equalizer
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Park
 import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.material.icons.filled.SettingsVoice
@@ -78,6 +79,7 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import dev.boksremote.audio.BandModel
 import dev.boksremote.audio.BandResponse
 import dev.boksremote.audio.MeasurementException
 import dev.boksremote.audio.Place
@@ -123,9 +125,10 @@ internal fun RoomCorrectionWizard(
     s: SpeakerState,
     speaker: SpeakerController,
     store: EqPresetStore,
-    shapes: List<BandResponse>,
+    bandModel: BandModel,
     onDismiss: () -> Unit,
 ) {
+    val shapes = bandModel.shapes
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val meter = remember { RoomMeter(context) }
@@ -280,6 +283,7 @@ internal fun RoomCorrectionWizard(
                                 Instruction(Icons.Default.Equalizer, "Hear & save")
                             }
                             HintText("About two minutes. Your current EQ comes back if you stop.")
+                            if (!bandModel.measured) ApproximateNote("The suggestion is approximate on this speaker: its EQ bands haven't been measured yet, so the app uses the Mix's.")
                         }
                         TuneStep.GOAL -> {
                             ControlLabel("Where is the speaker?")
@@ -356,6 +360,7 @@ internal fun RoomCorrectionWizard(
                             }
                             RoomPlot(r, shapes)
                             PlotLegend(showTarget = sound != SoundGoal.BALANCED)
+                            if (!bandModel.measured) ApproximateNote("\"With EQ\" is estimated from the Mix's bands, so this speaker may land a little differently. Listen before you save.")
                             EqGraph(r.bands, onChange = null)
                             OutlinedButton(onClick = {
                                 hearingCorrection = !hearingCorrection
@@ -595,6 +600,16 @@ private fun RoomPlot(r: RoomCorrection.Result, shapes: List<BandResponse>) {
         line(r.roomDb, colors.onSurfaceVariant.copy(alpha = 0.6f))
         if (r.targetDb.any { it != 0.0 }) line(r.targetDb, colors.tertiary, dashed = true)
         line(after, colors.primary)
+    }
+}
+
+/** Flags a result that rests on another model's band shapes. */
+@Composable
+private fun ApproximateNote(text: String) {
+    Row(verticalAlignment = Alignment.Top) {
+        Icon(Icons.Default.Info, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 1.dp).size(16.dp))
+        Spacer(Modifier.width(6.dp))
+        HintText(text)
     }
 }
 
