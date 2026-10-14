@@ -138,18 +138,21 @@ fun SpeakerScreen(speaker: SpeakerController, app: BoksApp, onBack: () -> Unit) 
         snackbarHost = { SnackbarHost(snackbar) },
     ) { padding ->
         AnimatedContent(
-            targetState = s.connection == ConnectionState.CONNECTED,
+            // Disconnected and failed share a panel, so switching between them doesn't fade.
+            targetState = if (s.connection == ConnectionState.FAILED) ConnectionState.DISCONNECTED else s.connection,
             transitionSpec = { fadeIn() togetherWith fadeOut() },
             label = "connection",
             modifier = Modifier.padding(padding).fillMaxSize(),
-        ) { showControls ->
+        ) { shown ->
             Column(
                 Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                when {
-                    showControls -> Controls(s, speaker, app)
-                    s.connection == ConnectionState.CONNECTING -> StatusPanel {
+                // Branch on the panel's own state, not s.connection: a panel fading out would otherwise
+                // redraw as the panel for the new state, flashing "Disconnected" right after connecting.
+                when (shown) {
+                    ConnectionState.CONNECTED -> Controls(s, speaker, app)
+                    ConnectionState.CONNECTING -> StatusPanel {
                         CircularProgressIndicator()
                         Spacer(Modifier.height(24.dp))
                         Text("Connecting to ${s.name ?: s.model?.label ?: "the ${s.kind}"}…", style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center)
