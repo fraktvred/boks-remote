@@ -26,6 +26,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AddCircleOutline
 import androidx.compose.material.icons.filled.DragHandle
+import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.RemoveCircleOutline
 import androidx.compose.material.icons.filled.SkipNext
@@ -63,6 +64,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -95,7 +102,7 @@ fun CycleSection(app: BoksApp, speaker: SpeakerController) {
     val notifications = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { cycle.start(speaker) }
     val canStart = palettes.size >= CycleConfig.MIN_PALETTES && !bridge.running
 
-    if (palettes.isNotEmpty()) CycleStrip(palettes, status.current.takeIf { status.running }, onClick = { editing = true })
+    if (palettes.isNotEmpty()) CycleStrip(palettes, status.current.takeIf { status.showing }, paused = !status.running, enabled = !bridge.running) { cycle.jumpTo(speaker, it.name) }
     val every = CycleConfig.intervalLabel(config.intervalSeconds)
     when {
         bridge.running -> HintText("Paused while the DMX bridge runs.")
@@ -106,10 +113,11 @@ fun CycleSection(app: BoksApp, speaker: SpeakerController) {
                     delay(250)
                 }
             }
-            Text(
-                "Next: ${status.next} in ${remaining / 60}:${(remaining % 60).toString().padStart(2, '0')}",
-                style = MaterialTheme.typography.bodyMedium,
-            )
+            Text("Next: ${status.next} in ${clock(remaining)}", style = MaterialTheme.typography.bodyMedium)
+        }
+        status.paused && status.showing -> {
+            val left = status.remainingMs?.let { " with ${clock(it / 1000)} left" }.orEmpty()
+            HintText("Paused on ${status.current}$left. Resume plays on from it.")
         }
         // Paused by a palette picked by hand or by the bridge; either way it carries on where it was.
         status.paused -> HintText("Paused. Resume carries on with ${status.next}.")
@@ -118,19 +126,25 @@ fun CycleSection(app: BoksApp, speaker: SpeakerController) {
     }
     Row(verticalAlignment = Alignment.CenterVertically) {
         if (status.running) {
-            FilledTonalButton(onClick = cycle::stop) {
-                Icon(Icons.Default.Stop, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+            FilledTonalButton(onClick = cycle::hold) {
+                Icon(Icons.Default.Pause, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
                 Spacer(Modifier.width(ButtonDefaults.IconSpacing))
-                Text("Stop")
+                Text("Pause")
             }
-            Spacer(Modifier.width(8.dp))
-            IconButton(onClick = cycle::skip) { Icon(Icons.Default.SkipNext, contentDescription = "Next palette now") }
         } else {
             Button(onClick = { notifications.launch(Manifest.permission.POST_NOTIFICATIONS) }, enabled = canStart) {
                 Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
                 Spacer(Modifier.width(ButtonDefaults.IconSpacing))
                 Text(if (status.paused) "Resume" else "Start")
             }
+        }
+        // Stop starts the next run from the top; Pause keeps the place.
+        if (status.running || status.paused) {
+            Spacer(Modifier.width(4.dp))
+            IconButton(onClick = cycle::stop) { Icon(Icons.Default.Stop, contentDescription = "Stop, next start from the beginning") }
+        }
+        if (status.running) {
+            IconButton(onClick = cycle::skip) { Icon(Icons.Default.SkipNext, contentDescription = "Next palette now") }
         }
         Spacer(Modifier.weight(1f))
         TextButton(onClick = { editing = true }) {
@@ -152,30 +166,49 @@ fun CycleSection(app: BoksApp, speaker: SpeakerController) {
     }
 }
 
-/** The cycle's palettes as small tiles, in play order, with the one on the light outlined. */
+/**
+ * The cycle's palettes as small tiles, in play order, with the one on the light outlined: solid while
+ * Cycle plays, dashed while it waits paused on it. Tapping one shows it.
+ */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun CycleStrip(palettes: List<LightPalette>, current: String?, onClick: () -> Unit) {
+private fun CycleStrip(palettes: List<LightPalette>, current: String?, paused: Boolean, enabled: Boolean, onPick: (LightPalette) -> Unit) {
     // Wraps rather than scrolls, so the whole cycle is visible at a glance.
     FlowRow(
-        Modifier.fillMaxWidth().clickable(onClickLabel = "Edit cycle", onClick = onClick),
+        Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         palettes.forEach { p ->
-            val outline = if (p.name == current) MaterialTheme.colorScheme.primary else Color.Transparent
             PaletteArt(
                 p.colors,
                 Modifier
                     .width(44.dp)
                     .height(32.dp)
-                    .border(2.dp, outline, RoundedCornerShape(8.dp))
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable(enabled = enabled, onClickLabel = "Show ${p.name}") { onPick(p) }
+                    .then(if (p.name == current) Modifier.tileOutline(MaterialTheme.colorScheme.primary, dashed = paused) else Modifier)
                     .padding(3.dp)
                     .clip(RoundedCornerShape(5.dp)),
             )
         }
     }
 }
+
+private fun Modifier.tileOutline(color: Color, dashed: Boolean): Modifier =
+    if (!dashed) border(2.dp, color, RoundedCornerShape(8.dp)) else drawBehind {
+        val width = 2.dp.toPx()
+        // The stroke is centred on its path, so the path sits half a stroke inside the tile.
+        drawRoundRect(
+            color,
+            topLeft = Offset(width / 2, width / 2),
+            size = Size(size.width - width, size.height - width),
+            cornerRadius = CornerRadius(8.dp.toPx() - width / 2),
+            style = Stroke(width, pathEffect = PathEffect.dashPathEffect(floatArrayOf(5.dp.toPx(), 3.dp.toPx()))),
+        )
+    }
+
+private fun clock(seconds: Long) = "${seconds / 60}:${(seconds % 60).toString().padStart(2, '0')}"
 
 private val ROW_HEIGHT = 60.dp
 

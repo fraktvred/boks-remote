@@ -39,7 +39,6 @@ import androidx.compose.material.icons.filled.Equalizer
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Lightbulb
 import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.SettingsInputAntenna
 import androidx.compose.material.icons.filled.Timer
@@ -73,6 +72,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -259,18 +259,26 @@ private fun Controls(s: SpeakerState, speaker: SpeakerController, app: BoksApp) 
     }
     s.brightness?.let { brightness ->
         // Moving the slider takes over from a running fade.
-        LevelCard("Brightness", Icons.Default.BrightnessMedium, brightness, { app.sleep.stop(); speaker.setBrightness(it) })
+        LevelCard("Brightness", Icons.Default.BrightnessMedium, brightness, { app.setBrightness(speaker, it) })
     }
     s.energyLevel?.let { level ->
-        SectionCard("Light mode", Icons.Default.Lightbulb) { Choice(EnergyLevel.entries, level, { it.label }, speaker::setEnergyLevel) }
+        SectionCard("Light mode", Icons.Default.Lightbulb) { LightModePicker(level, speaker::setEnergyLevel) }
     }
     if (s.family == Family.LIGHT && s.rpcAvailable) {
-        SectionCard("Colours", Icons.Default.Palette) { PaletteSection(s, speaker, app.palettes, app.cycle) }
+        ScenesSection(s, app) { PaletteSection(s, speaker, app.palettes, app.cycle) }
         SectionCard("Cycle", Icons.Default.Autorenew, trailing = { if (cycle.running) LiveBadge(receiving = true) }) { CycleSection(app, speaker) }
         SectionCard("Sleep fade", Icons.Default.Bedtime, trailing = { if (sleep.running) LiveBadge(receiving = true) }) { SleepSection(app, speaker, bridge.running) }
-        SectionCard("Effects", Icons.Default.Whatshot, trailing = { HintText("Hold to play") }) { FxPad(speaker) }
-        SectionCard("DMX bridge", Icons.Default.SettingsInputAntenna, trailing = { if (bridge.running) LiveBadge(receiving = bridge.packetsPerSecond > 0) }) {
-            DmxSection(app)
+        SectionCard("Effects", Icons.Default.Whatshot, trailing = { HintText("Hold, slide up to lock") }) { FxPad(speaker) }
+        // Folded by default: most sessions never use it, and the status line says enough until they do.
+        var dmxExpanded by rememberSaveable { mutableStateOf(false) }
+        SectionCard(
+            "DMX bridge",
+            Icons.Default.SettingsInputAntenna,
+            trailing = { if (bridge.running) LiveBadge(receiving = bridge.packetsPerSecond > 0) },
+            expanded = dmxExpanded,
+            onExpandedChange = { dmxExpanded = it },
+        ) {
+            if (dmxExpanded) DmxSection(app) else DmxSummary(app)
         }
     }
     if (s.eq != null || (s.family == Family.BIFROST && s.rpcAvailable)) {

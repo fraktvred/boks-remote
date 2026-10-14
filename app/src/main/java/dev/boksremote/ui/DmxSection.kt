@@ -94,6 +94,32 @@ fun DmxSection(app: BoksApp) {
     AnimatedVisibility(visible = showMap) { ChannelMap(config) }
 }
 
+/** The folded DMX card: whether the bridge runs and what it is doing, in a line or two. */
+@Composable
+fun DmxSummary(app: BoksApp) {
+    val status by app.bridge.status.collectAsState()
+    val config by app.dmxConfig.collectAsState()
+    val target = "${config.protocol.label} universe ${config.universe}"
+    if (!status.running) {
+        HintText("Off · $target")
+        return
+    }
+    Text(
+        when {
+            status.packetsPerSecond > 0 -> "Receiving $target from ${status.source}"
+            status.addresses.isEmpty() -> "Running · no Wi-Fi or hotspot connection"
+            else -> "Waiting for $target on ${status.addresses.first()}"
+        },
+        style = MaterialTheme.typography.bodyMedium,
+    )
+    val problem = listOfNotNull(
+        "Light disconnected, reconnecting…".takeIf { status.reconnecting },
+        status.networkError,
+        status.lightError?.let { "Light: $it" },
+    ).firstOrNull()
+    if (problem != null) Text(problem, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+}
+
 /** Header badge for the DMX card: a pulsing dot while packets arrive, a steady one while the bridge waits. */
 @Composable
 internal fun LiveBadge(receiving: Boolean) {

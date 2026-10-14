@@ -413,6 +413,8 @@ class SpeakerController(
     }
 
     private var dropJob: Job? = null
+    /** True while the Drop pad holds or plays, when brightness and effect are only borrowed. */
+    val dropping: Boolean get() = dropJob?.isActive == true
     /** The brightness to return to after a drop; kept when a new drop cuts the last one short. */
     private var dropReturn: Int? = null
 

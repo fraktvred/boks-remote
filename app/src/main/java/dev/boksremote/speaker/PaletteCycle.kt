@@ -31,12 +31,27 @@ data class CycleConfig(
 
 data class CycleStatus(
     val running: Boolean = false,
-    /** Stopped by a manual palette pick or the DMX bridge rather than by the user, so the screen offers Resume. */
+    /** Paused, by the user or by a palette picked by hand or the DMX bridge, so the screen offers Resume. */
     val paused: Boolean = false,
     val current: String? = null,
     val next: String? = null,
+    /** The light shows [current]: always while running, and while paused until something else is put on it. */
+    val showing: Boolean = false,
     /** [SystemClock.elapsedRealtime] of the next change. */
     val nextAt: Long = 0,
+    /** While paused on [current], the time it still had; null for a whole interval. */
+    val remainingMs: Long? = null,
+)
+
+/**
+ * Cycle frozen at one moment, for a scene: its settings, whether it ran, the palette it showed and
+ * how long that palette still had. [current] and [remainingMs] are null when unknown.
+ */
+data class CycleSnapshot(
+    val config: CycleConfig,
+    val running: Boolean,
+    val current: String? = null,
+    val remainingMs: Long? = null,
 )
 
 /**
@@ -89,12 +104,7 @@ class PaletteCycle(context: Context, private val scope: CoroutineScope, private 
 
     fun update(config: CycleConfig) {
         val old = _config.value
-        _config.value = config
-        prefs.edit()
-            .putString(KEY_NAMES, config.names.joinToString("\n"))
-            .putInt(KEY_INTERVAL, config.intervalSeconds)
-            .putBoolean(KEY_SHUFFLE, config.shuffle)
-            .apply()
+        save(config)
         if (!_status.value.running) return
         // A new interval restarts the countdown from now; any other edit only changes what comes next.
         if (config.intervalSeconds != old.intervalSeconds) run(advance = false) else refreshNext()
@@ -118,20 +128,82 @@ class PaletteCycle(context: Context, private val scope: CoroutineScope, private 
         if (name !in c.names) update(c.copy(names = c.names.toMutableList().apply { add(index.coerceIn(0, size), name) }))
     }
 
+    /** Where Cycle is now, as a scene keeps it. */
+    fun snapshot(): CycleSnapshot {
+        val s = _status.value
+        val remaining = if (s.running) (s.nextAt - SystemClock.elapsedRealtime()).coerceAtLeast(0) else s.remainingMs
+        return CycleSnapshot(_config.value, s.running, s.current, remaining)
+    }
+
+    /**
+     * Puts Cycle back to [snapshot]: running, it shows the palette it showed and changes once that
+     * palette's remaining time is up; otherwise it waits paused on it, and Resume carries on from there.
+     * True if Cycle now runs and so shows its own palette; it can't with fewer than two palettes left.
+     * [showing] says the light is left on the paused palette, so Resume plays on from it.
+     */
+    fun restore(light: SpeakerController, snapshot: CycleSnapshot, showing: Boolean = false): Boolean {
+        halt()
+        this.light = light
+        save(snapshot.config)
+        val names = palettes().map { it.name }
+        val current = snapshot.current?.takeIf { it in names }
+        val runs = snapshot.running && names.size >= CycleConfig.MIN_PALETTES
+        if (runs) {
+            // Nothing of the cycle that ran before carries over, not even its next pick.
+            _status.value = CycleStatus(current = current)
+            run(advance = current == null, resumeAt = current, firstDelayMs = snapshot.remainingMs)
+        } else {
+            _status.value = CycleStatus(
+                paused = current != null,
+                current = current,
+                next = current?.let { order.pick(names, snapshot.config.shuffle, it) },
+                showing = showing && current != null,
+                remainingMs = snapshot.remainingMs,
+            )
+        }
+        return runs
+    }
+
+    /** Paused on a palette still on the light, it plays on from that one with the time it had left. */
     fun start(light: SpeakerController) {
         this.light = light
-        run(advance = true)
+        val s = _status.value
+        if (!s.running && s.showing) run(advance = false, firstDelayMs = s.remainingMs) else run(advance = true)
     }
 
     fun skip() {
         if (_status.value.running) run(advance = true)
     }
 
-    /** A manual palette change wins over the cycle; it waits for Resume. */
-    fun pause() {
-        if (!_status.value.running) return
+    /**
+     * Shows [name] now. Running, the cycle carries on from it with a whole interval; otherwise it waits
+     * paused on it, so Resume carries on after it.
+     */
+    fun jumpTo(light: SpeakerController, name: String) {
+        val list = palettes()
+        val palette = list.firstOrNull { it.name == name } ?: return
+        this.light = light
+        if (_status.value.running) return run(advance = false, resumeAt = name)
+        val names = list.map { it.name }
+        order.played(name, names)
+        light.setPalette(palette)
+        _status.value = CycleStatus(paused = true, current = name, next = order.pick(names, _config.value.shuffle, name), showing = true)
+    }
+
+    /** The user's pause: the palette stays on the light and keeps its time left for Resume. */
+    fun hold() {
+        val s = _status.value
+        if (!s.running) return
         halt()
-        _status.update { it.copy(running = false, paused = true) }
+        _status.value = s.copy(running = false, paused = true, remainingMs = (s.nextAt - SystemClock.elapsedRealtime()).coerceAtLeast(0))
+    }
+
+    /** A manual palette change wins over the cycle; it waits for Resume, which goes on to the next one. */
+    fun pause() {
+        // Also once paused: the palette it waits on is no longer on the light.
+        if (!_status.value.let { it.running || it.paused }) return
+        halt()
+        _status.update { it.copy(running = false, paused = true, showing = false, remainingMs = null) }
     }
 
     fun stop() {
@@ -145,18 +217,26 @@ class PaletteCycle(context: Context, private val scope: CoroutineScope, private 
         if (wakeLock.isHeld) wakeLock.release()
     }
 
-    private fun run(advance: Boolean) {
+    /** [resumeAt] is shown first instead of a change, and stays for [firstDelayMs] rather than a whole interval. */
+    private fun run(advance: Boolean, resumeAt: String? = null, firstDelayMs: Long? = null) {
         val light = light ?: return
         job?.cancel()
         job = scope.launch {
             var change = advance
+            var resume = resumeAt
+            var firstDelay = firstDelayMs
             while (true) {
                 val list = palettes()
                 if (list.size < CycleConfig.MIN_PALETTES) return@launch stop()
                 val names = list.map { it.name }
                 val cfg = _config.value
                 val st = _status.value
-                val now = if (change || st.current !in names) {
+                val now = if (resume != null && resume in names) {
+                    light.state.first { it.connection == ConnectionState.CONNECTED }
+                    order.played(resume, names)
+                    light.setPalette(list.first { it.name == resume })
+                    resume
+                } else if (change || st.current !in names) {
                     val pick = st.next?.takeIf { it in names && it != st.current } ?: order.pick(names, cfg.shuffle, st.current)!!
                     // While the light is reconnecting the change waits for it rather than failing every interval.
                     light.state.first { it.connection == ConnectionState.CONNECTED }
@@ -164,12 +244,15 @@ class PaletteCycle(context: Context, private val scope: CoroutineScope, private 
                     light.setPalette(list.first { it.name == pick })
                     pick
                 } else st.current!!
-                val interval = cfg.intervalSeconds * 1000L
+                resume = null
+                val interval = firstDelay?.coerceIn(0, cfg.intervalSeconds * 1000L) ?: (cfg.intervalSeconds * 1000L)
+                firstDelay = null
                 // Times out by itself if this loop ever stops without releasing it.
                 wakeLock.acquire(interval + WAKE_MARGIN_MS)
                 _status.value = CycleStatus(
                     running = true,
                     current = now,
+                    showing = true,
                     next = order.pick(names, cfg.shuffle, now),
                     nextAt = SystemClock.elapsedRealtime() + interval,
                 )
@@ -177,6 +260,15 @@ class PaletteCycle(context: Context, private val scope: CoroutineScope, private 
                 change = true
             }
         }
+    }
+
+    private fun save(config: CycleConfig) {
+        _config.value = config
+        prefs.edit()
+            .putString(KEY_NAMES, config.names.joinToString("\n"))
+            .putInt(KEY_INTERVAL, config.intervalSeconds)
+            .putBoolean(KEY_SHUFFLE, config.shuffle)
+            .apply()
     }
 
     private fun refreshNext() {
