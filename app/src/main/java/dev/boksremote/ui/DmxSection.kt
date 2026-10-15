@@ -4,6 +4,10 @@ import android.Manifest
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -45,32 +49,32 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
-import dev.boksremote.BoksApp
+import dev.boksremote.BridgeControl
 import dev.boksremote.dmx.DmxConfig
 import dev.boksremote.dmx.DmxProtocol
 import dev.boksremote.dmx.DmxStatus
 import dev.boksremote.dmx.LightboksPersonality
 
 @Composable
-fun DmxSection(app: BoksApp) {
-    val status by app.bridge.status.collectAsState()
-    val config by app.dmxConfig.collectAsState()
+fun DmxSection(bridge: BridgeControl) {
+    val status by bridge.status.collectAsState()
+    val config by bridge.config.collectAsState()
     var showMap by remember { mutableStateOf(false) }
-    val notifications = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { app.startBridge() }
+    val notifications = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { bridge.start() }
 
     HintText("Receive DMX over Wi-Fi from a lighting desk or software and drive this Lightboks. Keeps running with the screen off.")
     // Status first while running: it says where to send, which is what the user needs at that moment.
-    AnimatedVisibility(visible = status.running) { BridgeStatusCard(status, config) }
-    ConfigEditor(config, onChange = app::updateDmxConfig)
+    // Outside a Column scope the default grows the panel out of its top-left corner; it opens downward instead.
+    AnimatedVisibility(visible = status.running, enter = OPEN, exit = CLOSE) { BridgeStatusCard(status, config) }
+    ConfigEditor(config, onChange = bridge::update)
     Row(verticalAlignment = Alignment.CenterVertically) {
         if (status.running) {
             Button(
-                onClick = app::stopBridge,
+                onClick = bridge::stop,
                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error, contentColor = MaterialTheme.colorScheme.onError),
             ) {
                 Icon(Icons.Default.Stop, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
@@ -91,14 +95,14 @@ fun DmxSection(app: BoksApp) {
             Icon(if (showMap) Icons.Default.ExpandLess else Icons.Default.ExpandMore, contentDescription = null)
         }
     }
-    AnimatedVisibility(visible = showMap) { ChannelMap(config) }
+    AnimatedVisibility(visible = showMap, enter = OPEN, exit = CLOSE) { ChannelMap(config) }
 }
 
 /** The folded DMX card: whether the bridge runs and what it is doing, in a line or two. */
 @Composable
-fun DmxSummary(app: BoksApp) {
-    val status by app.bridge.status.collectAsState()
-    val config by app.dmxConfig.collectAsState()
+fun DmxSummary(bridge: BridgeControl) {
+    val status by bridge.status.collectAsState()
+    val config by bridge.config.collectAsState()
     val target = "${config.protocol.label} universe ${config.universe}"
     if (!status.running) {
         HintText("Off · $target")
@@ -129,11 +133,11 @@ internal fun LiveBadge(receiving: Boolean) {
         animationSpec = infiniteRepeatable(tween(700), RepeatMode.Reverse),
         label = "pulse",
     )
-    val color = if (receiving) Color(0xFF2E7D32) else MaterialTheme.colorScheme.tertiary
+    val color = if (receiving) liveColor else MaterialTheme.colorScheme.tertiary
     Surface(shape = CircleShape, color = color.copy(alpha = 0.15f)) {
-        Row(Modifier.padding(horizontal = 10.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.padding(horizontal = Spacing.s, vertical = Spacing.xs), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(8.dp).alpha(if (receiving) pulse else 1f).background(color, CircleShape))
-            Spacer(Modifier.width(6.dp))
+            Spacer(Modifier.width(Spacing.s))
             Text(if (receiving) "Live" else "Waiting", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = color)
         }
     }
@@ -143,9 +147,9 @@ internal fun LiveBadge(receiving: Boolean) {
 private fun BridgeStatusCard(status: DmxStatus, config: DmxConfig) {
     Card(
         Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHighest),
+        colors = CardDefaults.cardColors(containerColor = tileContainer),
     ) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Column(Modifier.padding(Spacing.l), verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
             val target = "${config.protocol.label} universe ${config.universe}"
             if (status.addresses.isEmpty()) {
                 Text("No Wi-Fi or hotspot connection", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.error)
@@ -180,7 +184,7 @@ private fun BridgeStatusCard(status: DmxStatus, config: DmxConfig) {
 
 @Composable
 private fun ConfigEditor(config: DmxConfig, onChange: (DmxConfig) -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(Spacing.s)) {
         ControlLabel("Protocol")
         Choice(DmxProtocol.entries, config.protocol, { it.label }) {
             // Each protocol counts universes differently; jump to its first universe when switching.
@@ -193,7 +197,7 @@ private fun ConfigEditor(config: DmxConfig, onChange: (DmxConfig) -> Unit) {
             NumberField("Universe", config.universe, config.protocol.universes, Modifier.weight(1f)) {
                 onChange(config.copy(universe = it))
             }
-            Spacer(Modifier.width(12.dp))
+            Spacer(Modifier.width(Spacing.m))
             NumberField("Start address", config.startAddress, 1..(513 - config.personality.footprint), Modifier.weight(1f)) {
                 onChange(config.copy(startAddress = it))
             }
@@ -225,9 +229,9 @@ private fun NumberField(label: String, value: Int, range: IntRange, modifier: Mo
 private fun ChannelMap(config: DmxConfig) {
     Card(
         Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHighest),
+        colors = CardDefaults.cardColors(containerColor = tileContainer),
     ) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Column(Modifier.padding(Spacing.l), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             config.personality.channels().forEachIndexed { i, name ->
                 Text("${config.startAddress + i}".padStart(3) + "  $name", fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
             }
@@ -242,3 +246,7 @@ private fun ChannelMap(config: DmxConfig) {
         }
     }
 }
+
+/** Panels in the section open and close downward, across their full width. */
+private val OPEN = fadeIn() + expandVertically()
+private val CLOSE = fadeOut() + shrinkVertically()

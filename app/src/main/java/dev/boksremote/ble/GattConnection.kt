@@ -24,34 +24,28 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import java.util.UUID
 
-class GattException(message: String) : Exception(message)
-
-data class Notification(val characteristic: UUID, val value: ByteArray)
-
 /**
- * Coroutine wrapper over [BluetoothGatt]. Android drops a GATT operation issued while
+ * [Gatt] over Android's [BluetoothGatt]. Android drops a GATT operation issued while
  * another is in flight, so every operation runs under [opLock] and waits for its own
  * callback before the next one starts.
  */
 @SuppressLint("MissingPermission") // callers obtain BLUETOOTH_CONNECT before constructing this
-class GattConnection(private val context: Context, private val device: BluetoothDevice) {
+class GattConnection(private val context: Context, private val device: BluetoothDevice) : Gatt {
 
-    enum class State { DISCONNECTED, CONNECTING, READY }
-
-    private val _state = MutableStateFlow(State.DISCONNECTED)
-    val state: StateFlow<State> = _state
+    private val _state = MutableStateFlow(Gatt.State.DISCONNECTED)
+    override val state: StateFlow<Gatt.State> = _state
 
     private val _notifications = MutableSharedFlow<Notification>(
         extraBufferCapacity = 256, onBufferOverflow = BufferOverflow.DROP_OLDEST,
     )
-    val notifications: SharedFlow<Notification> = _notifications
+    override val notifications: SharedFlow<Notification> = _notifications
 
     private var gatt: BluetoothGatt? = null
     private val opLock = Mutex()
     private var pending: CompletableDeferred<Any?>? = null
     private var connectResult: CompletableDeferred<Unit>? = null
 
-    var mtu: Int = 23
+    override var mtu: Int = 23
         private set
 
     private val callback = object : BluetoothGattCallback() {
@@ -62,7 +56,7 @@ class GattConnection(private val context: Context, private val device: Bluetooth
                 // Connected with an error status: fail now rather than wait out the connect timeout.
                 connectResult?.completeExceptionally(GattException("connection failed (status $status)"))
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
-                _state.value = State.DISCONNECTED
+                _state.value = Gatt.State.DISCONNECTED
                 connectResult?.completeExceptionally(GattException("connection failed (status $status)"))
                 pending?.completeExceptionally(GattException("disconnected"))
                 g.close()
@@ -100,10 +94,10 @@ class GattConnection(private val context: Context, private val device: Bluetooth
         }
     }
 
-    suspend fun connect(timeoutMs: Long = 15_000) {
+    override suspend fun connect(timeoutMs: Long) {
         // A stale handle from an earlier session would otherwise stay registered with the stack.
         gatt?.let { it.disconnect(); it.close() }
-        _state.value = State.CONNECTING
+        _state.value = Gatt.State.CONNECTING
         val result = CompletableDeferred<Unit>()
         connectResult = result
         gatt = device.connectGatt(context, false, callback, BluetoothDevice.TRANSPORT_LE)
@@ -113,33 +107,33 @@ class GattConnection(private val context: Context, private val device: Bluetooth
             disconnect()
             throw e
         }
-        _state.value = State.READY
+        _state.value = Gatt.State.READY
     }
 
-    fun disconnect() {
+    override fun disconnect() {
         gatt?.let { it.disconnect(); it.close() }
         gatt = null
-        _state.value = State.DISCONNECTED
+        _state.value = Gatt.State.DISCONNECTED
     }
 
-    fun hasService(service: UUID) = gatt?.getService(service) != null
-    fun hasCharacteristic(characteristic: UUID) = find(characteristic) != null
+    override fun hasService(service: UUID) = gatt?.getService(service) != null
+    override fun hasCharacteristic(characteristic: UUID) = find(characteristic) != null
 
-    suspend fun requestMtu(desired: Int): Int = op { gatt().requestMtu(desired) } as Int
+    override suspend fun requestMtu(desired: Int): Int = op { gatt().requestMtu(desired) } as Int
 
-    suspend fun read(characteristic: UUID): ByteArray {
+    override suspend fun read(characteristic: UUID): ByteArray {
         val c = require(characteristic)
         return op { gatt().readCharacteristic(c) } as ByteArray
     }
 
-    suspend fun write(characteristic: UUID, value: ByteArray, withResponse: Boolean = true) {
+    override suspend fun write(characteristic: UUID, value: ByteArray, withResponse: Boolean) {
         val c = require(characteristic)
         val type = if (withResponse) BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
         else BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
         op { gatt().writeCharacteristic(c, value, type) == BluetoothStatusCodes.SUCCESS }
     }
 
-    suspend fun enableNotifications(characteristic: UUID) {
+    override suspend fun enableNotifications(characteristic: UUID) {
         val c = require(characteristic)
         val g = gatt()
         g.setCharacteristicNotification(c, true)

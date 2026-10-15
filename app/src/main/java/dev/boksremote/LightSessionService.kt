@@ -42,7 +42,9 @@ class LightSessionService : Service() {
         updates?.cancel()
         updates = app.scope.launch {
             // Only distinct summaries are posted, so the packet rate ticking doesn't re-notify every second.
-            combine(app.bridge.status, app.dmxConfig, app.cycle.status, app.cycle.config, app.sleep.status, ::summary)
+            // The user's own Cycle and Sleep fade, which are what keeps this service running.
+            val stage = app.ownStage
+            combine(app.bridge.status, app.dmxConfig, stage.cycle.status, stage.cycle.config, stage.sleep, ::summary)
                 .distinctUntilChanged()
                 // A post after stop would leave a stale, non-foreground notification behind.
                 .collect { if (it != null) nm.notify(NOTIFICATION_ID, build(it)) }

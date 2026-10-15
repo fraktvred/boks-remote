@@ -1,9 +1,8 @@
 package dev.boksremote.speaker
 
-import android.bluetooth.BluetoothDevice
-import android.content.Context
 import android.util.Log
-import dev.boksremote.ble.GattConnection
+import dev.boksremote.Device
+import dev.boksremote.ble.Gatt
 import dev.boksremote.proto.ProtoMessage
 import dev.boksremote.proto.proto
 import dev.boksremote.protocol.Advertisement
@@ -12,7 +11,6 @@ import dev.boksremote.protocol.ProductModel
 import dev.boksremote.protocol.RpcClient
 import dev.boksremote.protocol.SecurityFlags
 import dev.boksremote.protocol.Uuids
-import dev.boksremote.protocol.versionAtLeast
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.TimeoutCancellationException
@@ -22,12 +20,12 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import java.util.UUID
 
 enum class ConnectionState { CONNECTING, CONNECTED, DISCONNECTED, FAILED }
@@ -69,40 +67,30 @@ data class SpeakerState(
     val idleSince: Long? = null,
     val palette: LightPalette? = null,
     val paletteIsDefault: Boolean = false,
-    val rpcAvailable: Boolean = false,
+    val features: Set<Feature> = emptySet(),
     val pincodeRequired: Boolean = false,
     val locked: Boolean = false,
     val message: String? = null,
 )
 
 /**
- * One connected speaker. Routes each control to the right characteristic or RPC for the
- * product family and keeps [state] in sync with speaker notifications.
- *
- * Without a [gatt] it is a demo device (see [demo]): every control lands in [state] and goes nowhere else.
+ * One speaker or Lightboks over its [Gatt] link: connects, unlocks and reads it, keeps [state] in step
+ * with what it notifies, and routes each control to its family's characteristic or RPC (see
+ * [FamilyProtocol]). [SimulatedBoks] stands in for the device in demo mode and in tests.
  */
-class SpeakerController private constructor(
-    private val gatt: GattConnection?,
-    private val address: String,
-    private val advert: Advertisement?,
-    initial: SpeakerState,
+class SpeakerController(
+    private val gatt: Gatt,
+    advert: Advertisement,
     private val scope: CoroutineScope,
     private val pincodes: PincodeStore,
-) : Light {
-    constructor(context: Context, device: BluetoothDevice, advert: Advertisement?, scope: CoroutineScope, pincodes: PincodeStore) : this(
-        GattConnection(context, device),
-        device.address,
-        advert,
-        SpeakerState(family = advert?.family, model = advert?.model, name = advert?.name, firmware = advert?.firmware),
-        scope,
-        pincodes,
-    )
-
-    val demo get() = gatt == null
-    /** The Bluetooth link, for what only a real device does: connecting, reading and subscribing. */
-    private val ble get() = checkNotNull(gatt) { "a demo device has no Bluetooth link" }
+    /** A dummy of demo mode, which the device list never lists. */
+    override val demo: Boolean = false,
+    private val clock: Clock = Clock.ELAPSED,
+) : Light, Device {
+    private val address = advert.address
+    private val advertised = advert
     private var rpc: RpcClient? = null
-    private val _state = MutableStateFlow(initial)
+    private val _state = MutableStateFlow(SpeakerState(family = advert.family, model = advert.model, name = advert.name, firmware = advert.firmware))
     override val state: StateFlow<SpeakerState> = _state
 
     // Slider drags produce many values; only the latest matters, so a conflated channel drops stale ones.
@@ -114,43 +102,46 @@ class SpeakerController private constructor(
     private val jobs = mutableListOf<Job>()
 
     private val family get() = _state.value.family
+    private val protocol get() = FamilyProtocol.of(family ?: advertised.family)
+
+    private val wire = object : Wire {
+        override val rpc get() = this@SpeakerController.rpc != null
+        override fun has(c: UUID) = gatt.hasCharacteristic(c)
+
+        override suspend fun read(c: UUID): ByteArray? {
+            if (!gatt.hasCharacteristic(c)) return null
+            return try {
+                gatt.read(c)
+            } catch (e: Exception) {
+                currentCoroutineContext().ensureActive()
+                Log.d(TAG, "read $c: ${e.message}")
+                null
+            }
+        }
+
+        override suspend fun write(c: UUID, value: ByteArray) = gatt.write(c, value)
+        override suspend fun probeRpc() = this@SpeakerController.probeRpc()
+        override suspend fun call(service: String, method: String, request: ByteArray) = this@SpeakerController.call(service, method, request)
+        override suspend fun optional(block: suspend () -> Unit) = attempt(null, block)
+        override fun update(change: (SpeakerState) -> SpeakerState) = _state.update(change)
+    }
 
     private val link = object : LightLink {
         override suspend fun call(service: String, method: String, request: ByteArray) = this@SpeakerController.call(service, method, request)
-        override suspend fun write(characteristic: UUID, value: ByteArray) = this@SpeakerController.write(characteristic, value)
+        override suspend fun write(characteristic: UUID, value: ByteArray) = gatt.write(characteristic, value)
     }
     /** The light's content: palette, mode and effects. Only a Lightboks has any. */
-    val lightboks = Lightboks(link, _state, scope, ::report)
+    private val lightboks = Lightboks(link, _state, scope, ::report, clock::now)
+    override val output: LightOutput get() = lightboks
 
-    fun connect() {
+    override fun connect() {
         // Reconnect reuses this controller, so drop the previous session's collectors first.
         stopSession()
-        if (demo) {
-            // There is nothing to reach: the demo device is just as it was left.
-            _state.update { it.copy(connection = ConnectionState.CONNECTED, message = null) }
-        } else {
-            connectLink()
-        }
-        jobs += scope.launch {
-            _state.map { it.connection == ConnectionState.CONNECTED && it.activeInputs.isEmpty() }.distinctUntilChanged().collect { idle ->
-                _state.update { it.copy(idleSince = if (idle) Clock.ELAPSED.now() else null) }
-            }
-        }
-        if (demo) jobs += scope.launch { demoAutoOff() }
-        jobs += scope.launch { for (v in volumeWrites) attempt("volume") { writeVolume(v) } }
-        jobs += scope.launch {
-            for (id in fxWrites) attempt("effect") { lightboks.applyFx(id) }
-        }
-        jobs += scope.launch { for (v in brightnessWrites) attempt("brightness") { lightboks.applyBrightness(v) } }
-        jobs += scope.launch { for (w in eqWrites) attempt("EQ") { if (w.bands != null) writeCustomEq(w.bands) else writeEqMode(w.mode) } }
-    }
-
-    private fun connectLink() {
         // Set before launching, so a caller awaiting the outcome never sees the previous FAILED/DISCONNECTED.
         _state.update { it.copy(connection = ConnectionState.CONNECTING, message = null) }
         jobs += scope.launch {
             try {
-                ble.connect()
+                gatt.connect()
                 setUp()
                 _state.update { it.copy(connection = ConnectionState.CONNECTED) }
             } catch (e: Exception) {
@@ -158,220 +149,148 @@ class SpeakerController private constructor(
                 // attempt. A timeout is not a cancellation of this job and is reported as a failure.
                 currentCoroutineContext().ensureActive()
                 Log.w(TAG, "connect failed", e)
-                ble.disconnect()
+                gatt.disconnect()
                 _state.update { it.copy(connection = ConnectionState.FAILED, message = e.message ?: "Connection failed") }
             }
         }
         jobs += scope.launch {
-            ble.state.collect { s ->
-                if (s == GattConnection.State.DISCONNECTED && _state.value.connection == ConnectionState.CONNECTED) dropped()
+            gatt.state.collect { s ->
+                if (s == Gatt.State.DISCONNECTED && _state.value.connection == ConnectionState.CONNECTED) dropped()
             }
         }
-    }
-
-    /** A demo speaker turns itself off like a real one once its auto power-off time is up. */
-    private suspend fun demoAutoOff() {
-        _state.map { s -> s.idleSince?.let { since -> s.autoOffMinutes?.takeIf { it > 0 }?.let { since + it * 60_000L } } }
-            .distinctUntilChanged()
-            .collectLatest { offAt ->
-                if (offAt == null) return@collectLatest
-                delay(offAt - Clock.ELAPSED.now())
-                dropped()
+        jobs += scope.launch {
+            _state.map { it.connection == ConnectionState.CONNECTED && it.activeInputs.isEmpty() }.distinctUntilChanged().collect { idle ->
+                _state.update { it.copy(idleSince = if (idle) clock.now() else null) }
             }
+        }
+        jobs += scope.launch { for (v in volumeWrites) attempt("volume") { protocol.setVolume(wire, v) } }
+        jobs += scope.launch { for (id in fxWrites) attempt("effect") { lightboks.applyFx(id) } }
+        jobs += scope.launch { for (v in brightnessWrites) attempt("brightness") { lightboks.applyBrightness(v) } }
+        jobs += scope.launch {
+            for (w in eqWrites) attempt("EQ") { if (w.bands != null) protocol.setCustomEq(wire, w.bands) else protocol.setEqMode(wire, w.mode) }
+        }
     }
 
     private fun dropped() =
         _state.update { it.copy(connection = ConnectionState.DISCONNECTED, message = if (family == Family.LIGHT) "Lightboks disconnected" else "Speaker disconnected") }
 
-    /** Connects again and waits for the outcome; for callers that keep the link alive (the DMX bridge). */
-    suspend fun reconnect(): Boolean {
+    /** Connects again and waits for the outcome; for the device list, which keeps a held light connected. */
+    override suspend fun reconnect(): Boolean {
         connect()
         return awaitConnection()
     }
 
     /** Waits for an in-flight connect to finish; true if it ended connected. */
-    suspend fun awaitConnection(): Boolean =
+    override suspend fun awaitConnection(): Boolean =
         state.first { it.connection != ConnectionState.CONNECTING }.connection == ConnectionState.CONNECTED
 
-    fun disconnect() {
+    override fun disconnect() {
         stopSession()
-        gatt?.disconnect()
+        gatt.disconnect()
     }
 
     private fun stopSession() {
-        rpc?.close()
-        rpc = null
+        setRpc(null)
         jobs.forEach { it.cancel() }
         jobs.clear()
+    }
+
+    private fun setRpc(client: RpcClient?) {
+        rpc?.close()
+        rpc = client
+        _state.update { it.copy(features = protocol.features(wire)) }
     }
 
     private suspend fun setUp() {
         val family = detectFamily()
         _state.update { it.copy(family = family) }
-        val model = _state.value.model
-        ble.requestMtu(model?.mtuCap ?: if (family == Family.LEGACY) 96 else 247)
+        gatt.requestMtu(_state.value.model?.mtuCap ?: protocol.mtu)
 
-        jobs += scope.launch { ble.notifications.collect { onNotify(it.characteristic, it.value) } }
+        jobs += scope.launch { gatt.notifications.collect { onNotify(it.characteristic, it.value) } }
 
-        setUpRpc(family)
-        readInitialState(family)
-        subscribe(family)
-        checkSecurity(family)
+        setUpRpc()
+        // Unlock before anything else, as the official app does: a pincode-protected speaker may refuse or drop
+        // other reads and calls until then. Still locked, the state loads once the pincode is entered.
+        if (checkSecurity()) loadState()
+    }
+
+    private suspend fun loadState() {
+        protocol.readState(wire)
+        for (c in protocol.subscriptions) if (gatt.hasCharacteristic(c)) attempt(null) { gatt.enableNotifications(c) }
     }
 
     private fun detectFamily(): Family = when {
-        ble.hasService(Uuids.SPEAKER_CONTROL_SERVICE) -> Family.BIFROST
-        ble.hasService(Uuids.LIGHT_CONTROL_SERVICE) -> Family.LIGHT
-        ble.hasCharacteristic(Uuids.LEGACY_VOLUME) -> Family.LEGACY
-        else -> advert?.family ?: throw IllegalStateException("Not a supported SOUNDBOKS device")
+        gatt.hasService(Uuids.SPEAKER_CONTROL_SERVICE) -> Family.BIFROST
+        gatt.hasService(Uuids.LIGHT_CONTROL_SERVICE) -> Family.LIGHT
+        gatt.hasCharacteristic(Uuids.LEGACY_VOLUME) -> Family.LEGACY
+        else -> advertised.family
     }
 
-    private suspend fun setUpRpc(family: Family) {
-        val (tx, rx) = when (family) {
-            Family.BIFROST, Family.LIGHT -> Uuids.RPC_TX to Uuids.RPC_RX
-            // Pre-3.0 legacy firmware speaks an ASCII serial protocol on the same pair instead of RPC.
-            Family.LEGACY -> if (versionAtLeast(_state.value.firmware, 3) || _state.value.firmware == null) Uuids.LEGACY_UART_TX to Uuids.LEGACY_UART_RX else return
-        }
-        if (!ble.hasCharacteristic(tx) || !ble.hasCharacteristic(rx)) return
-        val client = RpcClient(ble, tx, rx, scope)
+    private suspend fun setUpRpc() {
+        val (tx, rx) = protocol.rpcPair(_state.value.firmware) ?: return setRpc(null)
+        if (!gatt.hasCharacteristic(tx) || !gatt.hasCharacteristic(rx)) return setRpc(null)
+        val client = RpcClient(gatt, tx, rx, scope)
         try {
             client.start()
-            rpc = client
-            _state.update { it.copy(rpcAvailable = true) }
+            setRpc(client)
         } catch (e: Exception) {
+            currentCoroutineContext().ensureActive()
             Log.w(TAG, "RPC unavailable", e)
             client.close()
+            setRpc(null)
         }
     }
 
-    private suspend fun readInitialState(family: Family) {
-        when (family) {
-            Family.BIFROST, Family.LIGHT -> {
-                readByte(Uuids.BATTERY_LEVEL)?.let { b -> _state.update { it.copy(battery = b.coerceIn(0, 100)) } }
-                readByte(Uuids.TEAMUP_MODE)?.let { b -> _state.update { it.copy(teamUp = TeamUpMode.entries.getOrNull(b)) } }
-                if (family == Family.BIFROST) {
-                    readByte(Uuids.VOLUME)?.let { b -> _state.update { it.copy(volume = b) } }
-                    readByte(Uuids.STEREO_ROLE)?.let { b -> _state.update { it.copy(stereoRole = StereoRole.entries.getOrNull(b)) } }
-                    readByte(Uuids.SOUND_STATUS)?.let { b -> _state.update { it.copy(activeInputs = bifrostInputs(b)) } }
-                } else {
-                    readByte(Uuids.LIGHT_BRIGHTNESS)?.let { b -> _state.update { it.copy(brightness = b) } }
-                    readByte(Uuids.LIGHT_ENERGY_LEVEL)?.let { b -> _state.update { it.copy(energyLevel = EnergyLevel.entries.getOrNull(b)) } }
-                }
-                readRpcInfo(family)
-            }
-            Family.LEGACY -> {
-                readString(Uuids.LEGACY_NAME)?.let { s -> _state.update { it.copy(name = s) } }
-                readString(Uuids.LEGACY_FIRMWARE)?.let { s -> _state.update { it.copy(firmware = s) } }
-                readByte(Uuids.LEGACY_VOLUME)?.let { b -> _state.update { it.copy(volume = b) } }
-                readByte(Uuids.LEGACY_STEREO_ROLE)?.let { b -> _state.update { it.copy(stereoRole = StereoRole.entries.getOrNull(b)) } }
-                readLegacyEq()
-                readByte(Uuids.LEGACY_SOUND_STATUS)?.let { b -> _state.update { it.copy(activeInputs = legacyInputs(b)) } }
-                readString(Uuids.LEGACY_SKAA_MODE)?.let { s -> _state.update { it.copy(teamUp = skaaMode(s)) } }
-            }
-        }
-    }
-
-    /** Device-information and settings that only exist as RPCs. Each is optional: older firmware may lack a method. */
-    private suspend fun readRpcInfo(family: Family) {
-        val rpc = rpc ?: run {
-            readString(Uuids.FIRMWARE_REVISION)?.let { s -> _state.update { it.copy(firmware = s) } }
-            return
-        }
-        // Probe with a short timeout: if the channel is silent, drop RPC rather than stall every later call.
+    private suspend fun probeRpc() {
+        val rpc = rpc ?: return
         try {
-            val id = rpc.call("DeviceInformationService", "GetProductModel", timeoutMs = 4_000).int(1)
+            val id = rpc.call("DeviceInformationService", "GetProductModel", timeoutMs = RPC_PROBE_MS).int(1)
             ProductModel.fromId(id)?.let { m -> _state.update { it.copy(model = m) } }
         } catch (e: TimeoutCancellationException) {
             Log.w(TAG, "RPC channel not answering; continuing without it")
-            rpc.close()
-            this.rpc = null
-            _state.update { it.copy(rpcAvailable = false) }
-            return
+            setRpc(null)
         } catch (e: Exception) {
+            currentCoroutineContext().ensureActive()
             Log.d(TAG, "GetProductModel: ${e.message}")
         }
-        attemptQuietly { rpc.call("DeviceInformationService", "GetFirmwareVersion").string(1).let { v -> _state.update { it.copy(firmware = v) } } }
-        attemptQuietly { rpc.call("DeviceInformationService", "GetName").string(1).takeIf { it.isNotBlank() }?.let { n -> _state.update { it.copy(name = n) } } }
-        attemptQuietly { rpc.call("SystemService", "GetAutoOff").int(1).let { m -> _state.update { it.copy(autoOffMinutes = m) } } }
-        if (family == Family.LIGHT) {
-            attemptQuietly {
-                val raw = rpc.call("LightContentService", "GetActivePalette")
-                val p = LightContentCodec.parsePalette(raw)
-                _state.update { it.copy(palette = p, paletteIsDefault = p == null) }
-            }
-        }
-        if (family == Family.BIFROST) {
-            attemptQuietly { rpc.call("AudioControlService", "GetEqMode").int(1).let { e -> _state.update { it.copy(eq = EqMode.entries.getOrNull(e)) } } }
-            attemptQuietly {
-                val bands = rpc.call("AudioControlService", "GetEqBands").bytes(2)
-                _state.update { it.copy(eqBands = EqCurve.fromWire(bands)) }
-            }
-        }
-    }
-
-    private suspend fun subscribe(family: Family) {
-        val chars = when (family) {
-            Family.BIFROST -> listOf(Uuids.VOLUME, Uuids.STEREO_ROLE, Uuids.SOUND_STATUS, Uuids.BATTERY_LEVEL, Uuids.TEAMUP_MODE)
-            Family.LIGHT -> listOf(Uuids.LIGHT_BRIGHTNESS, Uuids.LIGHT_ENERGY_LEVEL, Uuids.BATTERY_LEVEL, Uuids.TEAMUP_MODE)
-            Family.LEGACY -> listOf(Uuids.LEGACY_VOLUME, Uuids.LEGACY_STEREO_ROLE, Uuids.LEGACY_SOUND_STATUS, Uuids.LEGACY_SKAA_MODE, Uuids.LEGACY_POWER_MODE)
-        }
-        for (c in chars) if (ble.hasCharacteristic(c)) attemptQuietly { ble.enableNotifications(c) }
     }
 
     private fun onNotify(c: UUID, v: ByteArray) {
         if (v.isEmpty()) return
-        val b = v[0].toInt() and 0xFF
-        _state.update {
-            when (c) {
-                Uuids.VOLUME, Uuids.LEGACY_VOLUME -> it.copy(volume = b)
-                Uuids.BATTERY_LEVEL -> it.copy(battery = b.coerceIn(0, 100))
-                Uuids.STEREO_ROLE, Uuids.LEGACY_STEREO_ROLE -> it.copy(stereoRole = StereoRole.entries.getOrNull(b))
-                Uuids.TEAMUP_MODE -> it.copy(teamUp = TeamUpMode.entries.getOrNull(b))
-                Uuids.SOUND_STATUS -> it.copy(activeInputs = bifrostInputs(b))
-                Uuids.LEGACY_SOUND_STATUS -> it.copy(activeInputs = legacyInputs(b))
-                Uuids.LEGACY_SKAA_MODE -> it.copy(teamUp = skaaMode(String(v, Charsets.US_ASCII)))
-                Uuids.LIGHT_BRIGHTNESS -> it.copy(brightness = b)
-                Uuids.LIGHT_ENERGY_LEVEL -> it.copy(energyLevel = EnergyLevel.entries.getOrNull(b))
-                Uuids.LEGACY_POWER_MODE -> if (b == 0) it.copy(message = "Speaker is powering off") else it
-                else -> it
-            }
-        }
+        _state.update { protocol.decode(it, c, v) }
     }
 
     // --- security ----------------------------------------------------------------------------
 
-    private suspend fun checkSecurity(family: Family) {
-        val flagsChar = if (family == Family.LEGACY) Uuids.LEGACY_SECURITY_LEVEL else Uuids.SYSTEM_STATE
-        val flags = readByte(flagsChar)?.let(SecurityFlags::from) ?: advert?.security ?: return
+    /** True when the device is usable now: it has no pincode, or the saved one unlocked it. */
+    private suspend fun checkSecurity(): Boolean {
+        val flags = wire.read(protocol.security)?.firstOrNull()?.toInt()?.and(0xFF)?.let(SecurityFlags::from) ?: advertised.security ?: return true
         _state.update { it.copy(locked = flags.locked) }
-        if (!flags.pincodeEnabled) return
+        if (!flags.pincodeEnabled) return true
         val saved = pincodes.get(address)
-        if (saved != null && authenticate(saved)) return
+        if (saved != null && authenticate(saved)) return true
         _state.update { it.copy(pincodeRequired = true) }
+        return false
     }
 
     fun submitPincode(pin: String) = scope.launch {
         if (authenticate(pin)) {
             pincodes.put(address, pin)
             _state.update { it.copy(pincodeRequired = false, message = "Unlocked") }
-            readInitialState(family ?: return@launch)
+            loadState()
         } else {
-            // Keep a more specific reason (lockout, unsupported firmware) that authenticate() already set.
+            // Keep a more specific reason (lockout, unsupported firmware, no answer) that authenticate() already set.
             _state.update { it.copy(message = it.message ?: "Wrong pincode") }
         }
     }
 
     private suspend fun authenticate(pin: String): Boolean {
-        val rpc = rpc ?: run {
+        if (rpc == null) {
             _state.update { it.copy(message = "This firmware needs the official app for pincode entry") }
             return false
         }
         return try {
-            val response = if (family == Family.LEGACY) {
-                rpc.call("LegacySpeakerSecurityService", "Authenticate", proto { bytes(1, pin.toByteArray()) })
-            } else {
-                rpc.call("SecurityService", "AuthenticatePincode", proto { string(1, pin) })
-            }
+            val response = protocol.authenticate(wire, pin)
             val ok = response.int(1) == 0
             if (!ok) {
                 val lockoutMs = response.first(2)?.varint ?: 0
@@ -380,7 +299,10 @@ class SpeakerController private constructor(
             }
             ok
         } catch (e: Exception) {
+            currentCoroutineContext().ensureActive()
+            // The speaker never judged the pincode, so it is not "wrong" and the saved one is kept.
             Log.w(TAG, "authenticate failed", e)
+            _state.update { it.copy(message = "${if (family == Family.LIGHT) "The Lightboks" else "The speaker"} didn't answer (${e.message ?: "no reply"}); try again") }
             false
         }
     }
@@ -405,11 +327,6 @@ class SpeakerController private constructor(
             // Muted from the speaker's own buttons or by dragging to 0, there is nothing to return to.
             setVolume(unmuteVolume ?: UNMUTE_DEFAULT)
         }
-    }
-
-    private suspend fun writeVolume(v: Int) {
-        val c = if (family == Family.LEGACY) Uuids.LEGACY_VOLUME else Uuids.VOLUME
-        write(c, byteArrayOf(v.toByte()))
     }
 
     override fun setBrightness(value: Int) {
@@ -442,16 +359,12 @@ class SpeakerController private constructor(
     fun holdDrop(held: Boolean) = lightboks.holdDrop(held)
 
     fun setStereoRole(role: StereoRole) = control("stereo role") {
-        write(if (family == Family.LEGACY) Uuids.LEGACY_STEREO_ROLE else Uuids.STEREO_ROLE, byteArrayOf(role.ordinal.toByte()))
+        protocol.setStereoRole(wire, role)
         _state.update { it.copy(stereoRole = role) }
     }
 
     fun setTeamUp(mode: TeamUpMode) = control("team-up") {
-        if (family == Family.LEGACY) {
-            write(Uuids.LEGACY_SKAA_MODE, mode.name.lowercase().toByteArray(Charsets.US_ASCII))
-        } else {
-            write(Uuids.TEAMUP_MODE, byteArrayOf(mode.ordinal.toByte()))
-        }
+        protocol.setTeamUp(wire, mode)
         _state.update { it.copy(teamUp = mode) }
     }
 
@@ -465,34 +378,6 @@ class SpeakerController private constructor(
     fun setCustomEq(bandsDb: List<Int>) {
         _state.update { it.copy(eq = EqMode.USER, eqBands = bandsDb) }
         eqWrites.trySend(EqWrite(EqMode.USER, bandsDb))
-    }
-
-    private suspend fun writeEqMode(mode: EqMode) {
-        if (family == Family.LEGACY) {
-            write(Uuids.LEGACY_EQ_MODE, byteArrayOf(mode.ordinal.toByte()))
-        } else {
-            call("AudioControlService", "SetEqMode", proto { int32(1, mode.ordinal) })
-        }
-    }
-
-    private suspend fun writeCustomEq(bandsDb: List<Int>) {
-        val wire = EqCurve.toWire(bandsDb)
-        if (family == Family.LEGACY) {
-            write(Uuids.LEGACY_EQ_MODE, byteArrayOf(EqMode.USER.ordinal.toByte()) + wire)
-        } else {
-            // Same order as the official app: switch to the user curve, then load its bands.
-            call("AudioControlService", "SetEqMode", proto { int32(1, EqMode.USER.ordinal) })
-            call("AudioControlService", "SetEqBands", proto { uint32(1, EqCurve.BANDS); bytes(2, wire) })
-        }
-    }
-
-    /** Legacy EQ characteristic: mode byte, followed by the bands when the mode is user-defined. */
-    private suspend fun readLegacyEq() {
-        if (!ble.hasCharacteristic(Uuids.LEGACY_EQ_MODE)) return
-        val raw = try { ble.read(Uuids.LEGACY_EQ_MODE) } catch (e: Exception) { Log.d(TAG, "read EQ: ${e.message}"); return }
-        val mode = raw.firstOrNull()?.toInt()?.and(0xFF)?.let { EqMode.entries.getOrNull(it) }
-        val bands = if (mode == EqMode.USER) EqCurve.fromWire(raw.copyOfRange(1, raw.size)) else null
-        _state.update { it.copy(eq = mode, eqBands = bands) }
     }
 
     /** AUX input gain in dB (AudioControlService.SetInputConfig). Accepted by the Mix, effect unverified. */
@@ -520,46 +405,48 @@ class SpeakerController private constructor(
         val r = call("SystemService", "SetAutoOff", proto { uint32(1, minutes) })
         if (r.int(1) != 0) throw IllegalStateException("speaker rejected the value")
         // A new setting starts the timer over.
-        _state.update { it.copy(autoOffMinutes = minutes, idleSince = it.idleSince?.let { Clock.ELAPSED.now() }) }
+        _state.update { it.copy(autoOffMinutes = minutes, idleSince = it.idleSince?.let { clock.now() }) }
     }
 
-    /** SystemService.PowerOff{type: REBOOT}. Only RPC devices can restart; the link drops while it boots. */
+    /**
+     * SystemService.PowerOff{type: REBOOT}. Only RPC devices can restart. The link drops while it
+     * boots, and the device is connected again once it is back, for up to [RESTART_BACK_MS].
+     */
     fun restart() = scope.launch {
-        if (demo) {
-            // Gone while it boots, then back by itself.
-            dropped()
-            delay(DEMO_RESTART_MS)
-            if (_state.value.connection == ConnectionState.DISCONNECTED) connect()
-            return@launch
-        }
         val rpc = rpc ?: return@launch
         _state.update { it.copy(message = "Restarting…") }
-        // The light reboots before it can answer, so a timeout or dropped link here means it worked.
-        attemptQuietly { rpc.call("SystemService", "PowerOff", proto { int32(1, 1) }, timeoutMs = 3_000) }
+        // The device reboots before it can answer, so a timeout or dropped link here means it worked.
+        attempt(null) { rpc.call("SystemService", "PowerOff", proto { int32(1, 1) }, timeoutMs = 3_000) }
+        withTimeoutOrNull(RESTART_BACK_MS) {
+            state.first { it.connection != ConnectionState.CONNECTED }
+            while (true) {
+                // A connect already under way (the user tapped Reconnect, or the device list) is awaited, not doubled.
+                val back = if (state.value.connection == ConnectionState.CONNECTING) awaitConnection() else reconnect()
+                if (back) break
+                delay(RESTART_RETRY_MS)
+            }
+        }
     }
 
+    /**
+     * SystemService.PowerOff{type: POWEROFF} on RPC devices, as the official app does; they ignore a
+     * write to SYSTEM_POWER. Like a restart, the link drops before the answer, so that means it worked.
+     */
     override fun powerOff() {
-        control("power off") {
-            if (family == Family.LEGACY) write(Uuids.LEGACY_POWER_MODE, byteArrayOf(0))
-            else write(Uuids.SYSTEM_POWER, byteArrayOf(0, 0)) // [OFF, no reboot]
-            if (demo) dropped()
+        val rpc = rpc
+        if (rpc != null) {
+            scope.launch { attempt(null) { rpc.call("SystemService", "PowerOff", proto { int32(1, 0) }, timeoutMs = 3_000) } }
+            return
         }
+        control("power off") { protocol.powerOff(wire) }
     }
 
     fun clearMessage() = _state.update { it.copy(message = null) }
 
     // --- helpers -------------------------------------------------------------------------------
 
-    private fun requireRpc() = rpc ?: throw IllegalStateException("not supported on this speaker")
-
-    /** A characteristic write; a demo device takes it without a word. */
-    private suspend fun write(c: UUID, value: ByteArray) {
-        gatt?.write(c, value)
-    }
-
-    /** An RPC call; a demo device answers every one with an empty message, which reads as success. */
     private suspend fun call(service: String, method: String, request: ByteArray = ByteArray(0)): ProtoMessage =
-        if (demo) ProtoMessage(emptyList()) else requireRpc().call(service, method, request)
+        (rpc ?: throw IllegalStateException("not supported on this ${if (family == Family.LIGHT) "Lightboks" else "speaker"}")).call(service, method, request)
 
     private fun control(what: String, block: suspend () -> Unit) = scope.launch { attempt(what, block) }
 
@@ -572,8 +459,6 @@ class SpeakerController private constructor(
         }
     }
 
-    private suspend fun attemptQuietly(block: suspend () -> Unit) = attempt(null, block)
-
     /** A failed control, or with [what] null an optional step older firmware may lack. */
     private fun report(what: String?, e: Exception) {
         if (what == null) {
@@ -584,25 +469,18 @@ class SpeakerController private constructor(
         _state.update { it.copy(message = "Couldn't change $what: ${e.message}") }
     }
 
-    private suspend fun readByte(c: UUID): Int? {
-        if (!ble.hasCharacteristic(c)) return null
-        return try { ble.read(c).firstOrNull()?.toInt()?.and(0xFF) } catch (e: Exception) { Log.d(TAG, "read $c: ${e.message}"); null }
-    }
-
-    private suspend fun readString(c: UUID): String? {
-        if (!ble.hasCharacteristic(c)) return null
-        return try { String(ble.read(c), Charsets.UTF_8).trim('\u0000', ' ').ifBlank { null } } catch (e: Exception) { null }
-    }
-
     companion object {
         private const val TAG = "SpeakerController"
         /** About 30 %, a safe level to unmute to when the previous one is unknown. */
         private const val UNMUTE_DEFAULT = 77
-        private const val DEMO_RESTART_MS = 3_000L
+        private const val RPC_PROBE_MS = 4_000L
+        /** Long enough for a reboot and a connection timed out on the way. */
+        const val RESTART_BACK_MS = 60_000L
+        private const val RESTART_RETRY_MS = 2_000L
 
-        /** [device]'s dummy for demo mode, in the state it starts in. */
+        /** [device]'s dummy for demo mode, a [SimulatedBoks] in the state it starts in. */
         fun demo(device: DemoDevice, scope: CoroutineScope, pincodes: PincodeStore) =
-            SpeakerController(null, device.advert.address, device.advert, device.initial, scope, pincodes)
+            SpeakerController(SimulatedBoks(device.initial, scope), device.advert, scope, pincodes, demo = true)
 
         fun bifrostInputs(mask: Int) = listOf(1 to "Bluetooth", 2 to "Team-up", 4 to "AUX", 8 to "XLR 1", 16 to "XLR 2")
             .filter { mask and it.first != 0 }.map { it.second }

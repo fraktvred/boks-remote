@@ -46,6 +46,8 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+    // android.util.Log in the code under test logs nothing instead of throwing.
+    testOptions { unitTests.isReturnDefaultValues = true }
     buildFeatures {
         compose = true
         buildConfig = true

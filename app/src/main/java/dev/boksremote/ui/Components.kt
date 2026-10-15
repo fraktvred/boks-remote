@@ -1,6 +1,26 @@
 package dev.boksremote.ui
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.MutableTransitionState
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.core.EaseInCubic
+import androidx.compose.animation.core.EaseOutCubic
+import androidx.compose.animation.core.tween
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.window.DialogWindowProvider
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
+import androidx.compose.material3.Surface
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.indication
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -74,9 +94,9 @@ internal fun SectionCard(
 ) {
     Card(
         modifier = modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+        colors = CardDefaults.cardColors(containerColor = cardContainer),
     ) {
-        Column(Modifier.animateContentSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(Modifier.animateContentSize().padding(Spacing.l), verticalArrangement = Arrangement.spacedBy(Spacing.m)) {
             // The whole header toggles, but only the chevron shows the press.
             val press = remember { MutableInteractionSource() }
             val header = if (expanded == null) Modifier else Modifier.clickable(
@@ -86,11 +106,11 @@ internal fun SectionCard(
             ) { onExpandedChange(!expanded) }
             Row(header, verticalAlignment = Alignment.CenterVertically) {
                 Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
-                Spacer(Modifier.width(8.dp))
+                Spacer(Modifier.width(Spacing.s))
                 Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
                 trailing()
                 if (expanded != null) {
-                    Spacer(Modifier.width(4.dp))
+                    Spacer(Modifier.width(Spacing.xs))
                     Icon(
                         if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
                         contentDescription = null,
@@ -108,7 +128,48 @@ internal fun SectionCard(
  * For a [androidx.compose.material3.ModalBottomSheet]: a tall sheet otherwise expands up under the
  * status bar, so this keeps it below it with a gap that shows the screen behind.
  */
-internal fun Modifier.sheetTopMargin() = statusBarsPadding().padding(top = 16.dp)
+internal fun Modifier.sheetTopMargin() = statusBarsPadding().padding(top = Spacing.l)
+
+/**
+ * A page of its own over the device screen, which stays as it was underneath: a full-screen window
+ * with [top] as its top bar. [fromSide] slides it in from the right edge and back out to it, like a
+ * page navigated to; otherwise it rises a little, like an editor opened on the spot. [top] gets
+ * `close`, which takes the page away the way it came before calling [onDismiss], as Back does unless
+ * [onBack] handles it, such as a step back through a wizard.
+ */
+@Composable
+internal fun FullScreenPage(
+    onDismiss: () -> Unit,
+    fromSide: Boolean = false,
+    onBack: (() -> Unit)? = null,
+    top: @Composable RowScope.(close: () -> Unit) -> Unit,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    val shown = remember { MutableTransitionState(false).apply { targetState = true } }
+    // A side page leaves the way it came, and is dismissed once it has gone; an editor just goes.
+    val close = { if (fromSide) shown.targetState = false else onDismiss() }
+    if (fromSide && shown.isIdle && !shown.currentState) LaunchedEffect(Unit) { onDismiss() }
+    Dialog(
+        onDismissRequest = onBack ?: close,
+        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false, dismissOnClickOutside = false),
+    ) {
+        // The window's own dialog animation would play on top of the page's.
+        val window = (LocalView.current.parent as? DialogWindowProvider)?.window
+        SideEffect { window?.setWindowAnimations(0) }
+        val enter = if (fromSide) slideInHorizontally(tween(PAGE_MS, easing = EaseOutCubic)) { it } else slideInVertically { it / 12 } + fadeIn()
+        val exit = slideOutHorizontally(tween(PAGE_MS, easing = EaseInCubic)) { it }
+        AnimatedVisibility(shown, enter = enter, exit = exit) {
+            Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
+                Column(Modifier.fillMaxSize().statusBarsPadding()) {
+                    Row(Modifier.fillMaxWidth().height(64.dp).padding(start = Spacing.xs, end = Spacing.l), verticalAlignment = Alignment.CenterVertically) { top(close) }
+                    content()
+                }
+            }
+        }
+    }
+}
+
+private const val PAGE_MS = 300
 
 /** A small label above a control inside a [SectionCard]. */
 @Composable
@@ -118,12 +179,13 @@ internal fun ControlLabel(text: String) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun <T> Choice(options: List<T>, selected: T?, label: (T) -> String, onSelect: (T) -> Unit) {
+internal fun <T> Choice(options: List<T>, selected: T?, label: (T) -> String, enabled: Boolean = true, onSelect: (T) -> Unit) {
     val haptics = LocalHapticFeedback.current
     SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
         options.forEachIndexed { i, option ->
             SegmentedButton(
                 selected = option == selected,
+                enabled = enabled,
                 onClick = {
                     if (option != selected) haptics.performHapticFeedback(HapticFeedbackType.SegmentTick)
                     onSelect(option)

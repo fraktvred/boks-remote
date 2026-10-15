@@ -11,6 +11,8 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
+import androidx.compose.animation.animateContentSize
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -61,7 +63,6 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -84,8 +85,8 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import dev.boksremote.BoksApp
 import dev.boksremote.R
-import dev.boksremote.ble.Scanner
 import dev.boksremote.protocol.Advertisement
 import dev.boksremote.speaker.DemoDevice
 import kotlinx.coroutines.launch
@@ -93,24 +94,22 @@ import kotlinx.coroutines.launch
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ScanScreen(
-    scanner: Scanner,
+    app: BoksApp,
     demoMode: Boolean,
     onDemoModeChange: (Boolean) -> Unit,
     onOpen: (Advertisement) -> Unit,
     onOpenDemo: (DemoDevice) -> Unit,
 ) {
+    val scanner = app.scanner
     val results by scanner.results.collectAsState()
+    val nearby by app.nearby.collectAsState()
     val scanning by scanner.scanning.collectAsState()
     // Scanner.bluetoothEnabled is a plain getter, so bump this to re-read it after the enable prompt returns.
     var bluetoothCheck by remember { mutableIntStateOf(0) }
     val bluetoothOn = remember(bluetoothCheck, scanning) { scanner.bluetoothEnabled }
     val enableBluetooth = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
         bluetoothCheck++
-        scanner.start()
-    }
-    DisposableEffect(Unit) {
-        scanner.start()
-        onDispose { scanner.stop() }
+        app.list.scan()
     }
     val pullState = rememberPullToRefreshState()
     val scope = rememberCoroutineScope()
@@ -119,75 +118,91 @@ fun ScanScreen(
         topBar = {
             // The menu sits beside the title rather than in a row above it, as in a large app bar.
             Row(
-                Modifier.fillMaxWidth().windowInsetsPadding(TopAppBarDefaults.windowInsets).heightIn(min = 80.dp).padding(start = 16.dp, end = 4.dp),
+                Modifier.fillMaxWidth().windowInsetsPadding(TopAppBarDefaults.windowInsets).heightIn(min = 80.dp).padding(start = Spacing.l, end = Spacing.xs),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 AppMark(40.dp)
-                Spacer(Modifier.width(12.dp))
+                Spacer(Modifier.width(Spacing.m))
                 AppTitle(Modifier.weight(1f))
                 ScanMenu(demoMode, onDemoModeChange)
             }
         },
     ) { padding ->
-        // First-seen order: sorting by live RSSI made rows jump under the user's finger.
-        val list = results.values.toList()
+        // First-seen order: sorting by live RSSI made rows jump under the user's finger. A connected
+        // device stays listed when a new scan misses it, as it may stop advertising once connected.
+        val list = nearby.values.map { results[it.address] ?: it.ad } + results.values.filter { it.address !in nearby }
         PullToRefreshBox(
             isRefreshing = false,
             // The scan shows its own progress, so the pull indicator only acknowledges the pull. It
             // never sees isRefreshing change, which is what normally sends it away, so hide it here.
-            onRefresh = { scanner.start(); scope.launch { pullState.animateToHidden() } },
+            onRefresh = { app.list.scan(); scope.launch { pullState.animateToHidden() } },
             state = pullState,
             modifier = Modifier.padding(padding).fillMaxSize(),
         ) {
-            Column(Modifier.fillMaxSize()) {
-                if (demoMode) DemoDevices(onOpen = onOpenDemo, onTurnOff = { onDemoModeChange(false) })
-                Box(Modifier.weight(1f)) {
-                    when {
-                        !bluetoothOn -> EmptyState(
-                            icon = Icons.Default.BluetoothDisabled,
-                            title = "Bluetooth is off",
-                            body = "Turn on Bluetooth to find speakers and lights nearby.",
-                            action = "Turn on Bluetooth",
-                            onAction = { enableBluetooth.launch(Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE)) },
-                        )
-                        list.isEmpty() && scanning -> EmptyState(
-                            icon = Icons.AutoMirrored.Filled.BluetoothSearching,
-                            title = "Looking for speakers and lights…",
-                            body = "Make sure your SOUNDBOKS or Lightboks is switched on and close by.",
-                            searching = true,
-                        )
-                        list.isEmpty() -> EmptyState(
-                            icon = Icons.Default.Speaker,
-                            title = "No speakers or lights found",
-                            body = "Check that your speaker or Lightboks is on, then scan again.",
-                            action = "Scan again",
-                            onAction = scanner::start,
-                        )
-                        else -> LazyColumn(
-                            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 16.dp),
-                            verticalArrangement = Arrangement.spacedBy(12.dp),
-                            modifier = Modifier.fillMaxSize(),
-                        ) {
-                            item(key = "header") { ScanHeader(scanning, onScan = scanner::start) }
-                            items(list, key = { it.address }) { ad ->
-                                DeviceRow(ad, Modifier.animateItem()) { onOpen(ad) }
-                            }
-                            if (!scanning) {
-                                item(key = "hint") {
-                                    Text(
-                                        "Don't see yours? Switch it on, bring the phone closer and scan again.",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        textAlign = TextAlign.Center,
-                                        modifier = Modifier.fillMaxWidth().padding(top = 4.dp).animateItem(),
-                                    )
-                                }
+            val enableBluetoothNow = { enableBluetooth.launch(Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE)) }
+            when {
+                // The dummies scroll with the list, so their quick settings never squeeze the real devices out.
+                demoMode || (bluetoothOn && list.isNotEmpty()) -> LazyColumn(
+                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(Spacing.m),
+                    modifier = Modifier.fillMaxSize(),
+                ) {
+                    if (demoMode) {
+                        item(key = "demo") { DemoHeader(onTurnOff = { onDemoModeChange(false) }) }
+                        items(DemoDevice.entries, key = { it.advert.address }) { device ->
+                            DeviceRow(device.advert, Modifier, demo = true, onClick = { onOpenDemo(device) }) {
+                                QuickSettings(remember(device) { app.panelOf(app.demoDevice(device)) }, onOpen = { onOpenDemo(device) })
                             }
                         }
                     }
+                    if (!bluetoothOn) {
+                        item(key = "bluetooth") { ListNote("Bluetooth is off. Turn it on to find speakers and lights nearby.", "Turn on Bluetooth", enableBluetoothNow) }
+                        return@LazyColumn
+                    }
+                    item(key = "header") { ScanHeader(scanning, onScan = scanner::start) }
+                    items(list, key = { it.address }) { ad ->
+                        val device = nearby[ad.address]?.device
+                        DeviceRow(ad, Modifier.animateItem(), onClick = { onOpen(ad) }) {
+                            if (device != null) QuickSettings(remember(device) { app.panelOf(device) }, onOpen = { onOpen(ad) })
+                        }
+                    }
+                    when {
+                        list.isEmpty() && scanning -> item(key = "hint") { ListNote("Make sure your SOUNDBOKS or Lightboks is switched on and close by.") }
+                        list.isEmpty() -> item(key = "hint") { ListNote("No speakers or lights found. Check that yours is on, then scan again.") }
+                        !scanning -> item(key = "hint") { ListNote("Don't see yours? Switch it on, bring the phone closer and scan again.", modifier = Modifier.animateItem()) }
+                    }
                 }
+                !bluetoothOn -> EmptyState(
+                    icon = Icons.Default.BluetoothDisabled,
+                    title = "Bluetooth is off",
+                    body = "Turn on Bluetooth to find speakers and lights nearby.",
+                    action = "Turn on Bluetooth",
+                    onAction = enableBluetoothNow,
+                )
+                scanning -> EmptyState(
+                    icon = Icons.AutoMirrored.Filled.BluetoothSearching,
+                    title = "Looking for speakers and lights…",
+                    body = "Make sure your SOUNDBOKS or Lightboks is switched on and close by.",
+                    searching = true,
+                )
+                else -> EmptyState(
+                    icon = Icons.Default.Speaker,
+                    title = "No speakers or lights found",
+                    body = "Check that your speaker or Lightboks is on, then scan again.",
+                    action = "Scan again",
+                    onAction = scanner::start,
+                )
             }
         }
+    }
+}
+
+/** A line under the list, centred, with an optional button. */
+@Composable
+private fun ListNote(text: String, action: String? = null, onAction: () -> Unit = {}, modifier: Modifier = Modifier) {
+    Column(modifier.fillMaxWidth().padding(top = Spacing.xs), horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(text, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
+        if (action != null) TextButton(onClick = onAction) { Text(action) }
     }
 }
 
@@ -198,12 +213,12 @@ private fun ScanHeader(scanning: Boolean, onScan: () -> Unit) {
         Text("Nearby", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
         if (scanning) {
             CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.5.dp, trackColor = MaterialTheme.colorScheme.surfaceContainerHighest)
-            Spacer(Modifier.width(8.dp))
-            Text("Scanning", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(end = 12.dp))
+            Spacer(Modifier.width(Spacing.s))
+            Text("Scanning", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(end = Spacing.m))
         } else {
             TextButton(onClick = onScan) {
                 Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(8.dp))
+                Spacer(Modifier.width(Spacing.s))
                 Text("Scan again")
             }
         }
@@ -253,60 +268,65 @@ private fun ScanMenu(demoMode: Boolean, onDemoModeChange: (Boolean) -> Unit) {
     }
 }
 
-/** A dummy of each device over the scan, whose screens work without one at hand. */
+/** "Demo" over the dummies of each device, whose screens work without one at hand. */
 @Composable
-private fun DemoDevices(onOpen: (DemoDevice) -> Unit, onTurnOff: () -> Unit) {
-    Column(Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("Demo", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
-            TextButton(onClick = onTurnOff) { Text("Turn off") }
-        }
-        DemoDevice.entries.forEach { device -> DeviceRow(device.advert, Modifier, demo = true) { onOpen(device) } }
+private fun DemoHeader(onTurnOff: () -> Unit) {
+    Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text("Demo", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
+        TextButton(onClick = onTurnOff) { Text("Turn off") }
     }
 }
 
-/** [demo]: a dummy, which has no signal to show. */
+/**
+ * A device's card: who it is, which opens it, over its [quickSettings]. [demo]: a dummy, which has no
+ * signal to show.
+ */
 @Composable
-private fun DeviceRow(ad: Advertisement, modifier: Modifier, demo: Boolean = false, onClick: () -> Unit) {
+private fun DeviceRow(ad: Advertisement, modifier: Modifier, demo: Boolean = false, onClick: () -> Unit, quickSettings: @Composable () -> Unit) {
     val colors = MaterialTheme.colorScheme
     Card(
-        onClick = onClick,
         modifier = modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = colors.surfaceContainerLow),
+        colors = CardDefaults.cardColors(containerColor = cardContainer),
     ) {
-        Row(Modifier.padding(horizontal = 16.dp, vertical = 20.dp), verticalAlignment = Alignment.CenterVertically) {
-            DeviceBadge(ad.family, size = 56.dp)
-            Spacer(Modifier.width(16.dp))
-            Column(Modifier.weight(1f)) {
-                Text(shownName(ad.name) ?: ad.model?.label ?: "SOUNDBOKS device", style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                val details = listOfNotNull(ad.model?.label?.takeIf { it != ad.name }, ad.firmware?.let { "Firmware $it" })
-                if (details.isNotEmpty()) {
-                    Text(
-                        details.joinToString(" · "),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = colors.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
+        Column(Modifier.animateContentSize()) {
+            Row(
+                Modifier.fillMaxWidth().clickable(onClick = onClick).padding(start = Spacing.l, end = Spacing.l, top = Spacing.l, bottom = Spacing.l),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                DeviceBadge(ad.family, size = 56.dp)
+                Spacer(Modifier.width(Spacing.l))
+                Column(Modifier.weight(1f)) {
+                    Text(shownName(ad.name) ?: ad.model?.label ?: "SOUNDBOKS device", style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    val details = listOfNotNull(ad.model?.label?.takeIf { it != ad.name }, ad.firmware?.let { "Firmware $it" })
+                    if (details.isNotEmpty()) {
+                        Text(
+                            details.joinToString(" · "),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = colors.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+                if (ad.security?.pincodeEnabled == true || ad.security?.locked == true) {
+                    Icon(
+                        Icons.Default.Lock,
+                        contentDescription = if (ad.security.locked) "Anti-theft locked" else "Pincode protected",
+                        tint = colors.onSurfaceVariant,
+                        modifier = Modifier.padding(end = Spacing.s).size(20.dp),
                     )
                 }
+                if (!demo) {
+                    Icon(
+                        signalIcon(ad.rssi),
+                        contentDescription = "Signal ${ad.rssi} dBm",
+                        tint = colors.onSurfaceVariant,
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
+                Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = colors.onSurfaceVariant)
             }
-            if (ad.security?.pincodeEnabled == true || ad.security?.locked == true) {
-                Icon(
-                    Icons.Default.Lock,
-                    contentDescription = if (ad.security.locked) "Anti-theft locked" else "Pincode protected",
-                    tint = colors.onSurfaceVariant,
-                    modifier = Modifier.padding(end = 8.dp).size(20.dp),
-                )
-            }
-            if (!demo) {
-                Icon(
-                    signalIcon(ad.rssi),
-                    contentDescription = "Signal ${ad.rssi} dBm",
-                    tint = colors.onSurfaceVariant,
-                    modifier = Modifier.size(20.dp),
-                )
-            }
-            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = colors.onSurfaceVariant)
+            Box(Modifier.padding(start = Spacing.l, end = Spacing.l, bottom = Spacing.l)) { quickSettings() }
         }
     }
 }
@@ -322,20 +342,20 @@ private fun signalIcon(rssi: Int): ImageVector = when {
 @Composable
 private fun EmptyState(icon: ImageVector, title: String, body: String, action: String? = null, onAction: () -> Unit = {}, searching: Boolean = false) {
     Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(32.dp),
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(Spacing.xxl),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Spacer(Modifier.height(32.dp))
+        Spacer(Modifier.height(Spacing.xxl))
         Box(Modifier.size(176.dp), contentAlignment = Alignment.Center) {
             if (searching) Pulse(Modifier.matchParentSize())
             IconBadge(icon, size = 88.dp, iconSize = 40.dp, container = MaterialTheme.colorScheme.secondaryContainer, content = MaterialTheme.colorScheme.onSecondaryContainer)
         }
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(Spacing.s))
         Text(title, style = MaterialTheme.typography.titleLarge, textAlign = TextAlign.Center)
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(Spacing.s))
         Text(body, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
         if (action != null) {
-            Spacer(Modifier.height(24.dp))
+            Spacer(Modifier.height(Spacing.xl))
             Button(onClick = onAction) { Text(action) }
         }
     }
@@ -369,14 +389,14 @@ private fun Pulse(modifier: Modifier) {
 fun PermissionScreen(askedBefore: Boolean, onRequest: () -> Unit, onOpenSettings: () -> Unit) {
     Scaffold { padding ->
         Column(
-            Modifier.padding(padding).fillMaxSize().padding(32.dp),
+            Modifier.padding(padding).fillMaxSize().padding(Spacing.xxl),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
         ) {
             IconBadge(Icons.Default.Bluetooth, size = 88.dp, iconSize = 40.dp)
-            Spacer(Modifier.height(24.dp))
+            Spacer(Modifier.height(Spacing.xl))
             Text("Find your devices", style = MaterialTheme.typography.headlineSmall, textAlign = TextAlign.Center)
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(Spacing.s))
             Text(
                 "Boks Remote controls SOUNDBOKS speakers and the Lightboks over Bluetooth. Allow Nearby devices so it can find them. " +
                     "No account or location access is needed.",
@@ -384,10 +404,10 @@ fun PermissionScreen(askedBefore: Boolean, onRequest: () -> Unit, onOpenSettings
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
             )
-            Spacer(Modifier.height(24.dp))
+            Spacer(Modifier.height(Spacing.xl))
             Button(onClick = onRequest) { Text("Allow Nearby devices") }
             if (askedBefore) {
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(Spacing.s))
                 TextButton(onClick = onOpenSettings) { Text("Open app settings") }
             }
         }

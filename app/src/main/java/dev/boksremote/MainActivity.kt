@@ -12,19 +12,17 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.dynamicDarkColorScheme
-import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LifecycleResumeEffect
+import androidx.lifecycle.compose.LifecycleStartEffect
+import dev.boksremote.ui.AppTheme
 import dev.boksremote.ui.PermissionScreen
 import dev.boksremote.ui.ScanScreen
 import dev.boksremote.ui.SpeakerScreen
@@ -64,20 +62,18 @@ private fun App(app: BoksApp) {
         )
         return
     }
+    // The list keeps its devices connected for their quick settings only while the app is on screen.
+    LifecycleStartEffect(Unit) {
+        app.setForeground(true)
+        onStopOrDispose { app.setForeground(false) }
+    }
     val speaker by app.speaker.collectAsState()
     val demoMode by app.demoMode.collectAsState()
     val current = speaker
     if (current == null) {
-        ScanScreen(app.scanner, demoMode, onDemoModeChange = app::setDemoMode, onOpen = app::open, onOpenDemo = app::openDemo)
+        ScanScreen(app, demoMode, onDemoModeChange = app::setDemoMode, onOpen = app::open, onOpenDemo = app::openDemo)
     } else {
         BackHandler { app.close() }
-        SpeakerScreen(current, app, onBack = app::close)
+        SpeakerScreen(remember(current) { app.panelOf(current) }, onBack = app::close)
     }
-}
-
-@Composable
-private fun AppTheme(content: @Composable () -> Unit) {
-    val context = LocalContext.current
-    val scheme = if (isSystemInDarkTheme()) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-    MaterialTheme(colorScheme = scheme, content = content)
 }

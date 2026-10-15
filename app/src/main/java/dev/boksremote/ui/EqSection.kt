@@ -6,6 +6,7 @@ import android.content.pm.PackageManager
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
+import dev.boksremote.speaker.PaletteCodec
 import dev.boksremote.audio.BandCalibration
 import dev.boksremote.audio.BandModels
 import dev.boksremote.audio.InputProbe
@@ -49,6 +50,8 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -91,7 +94,6 @@ import dev.boksremote.speaker.SpeakerState
 import kotlin.math.abs
 import kotlin.math.roundToInt
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.selection.selectable
@@ -103,7 +105,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.text.font.FontWeight
 
-private fun profileIcon(title: String): ImageVector = when (title) {
+internal fun profileIcon(title: String): ImageVector = when (title) {
     "Bass+" -> Icons.Default.GraphicEq
     "Outdoor" -> Icons.Default.Park
     "Indoor" -> Icons.Default.Home
@@ -128,7 +130,7 @@ internal fun EqSection(s: SpeakerState, speaker: SpeakerController, store: EqPre
     val profiles = SoundProfiles.forModel(s.model)
     val bands = s.eqBands ?: EqCurve.FLAT
     val custom = s.eq == EqMode.USER
-    val activeSaved = if (custom) saved.firstOrNull { it.bands == bands } else null
+    val activeSaved = activePreset(s, saved)
     // The saved curve being edited, so it can be updated in place once it no longer matches.
     var origin by remember { mutableStateOf<EqPreset?>(null) }
     if (activeSaved != null) origin = activeSaved
@@ -138,9 +140,8 @@ internal fun EqSection(s: SpeakerState, speaker: SpeakerController, store: EqPre
     var naming by remember { mutableStateOf(false) }
     var renaming by remember { mutableStateOf<EqPreset?>(null) }
     var deleting by remember { mutableStateOf<EqPreset?>(null) }
-    var tuning by remember { mutableStateOf(false) }
 
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Spacing.s)) {
         profiles.forEach { p ->
             ProfileTile(p.title, profileIcon(p.title), selected = s.eq == p.mode, onClick = { speaker.setEq(p.mode) }, Modifier.weight(1f))
         }
@@ -151,9 +152,9 @@ internal fun EqSection(s: SpeakerState, speaker: SpeakerController, store: EqPre
     // A fixed two-column grid with "New EQ" last, so cards never reflow when the selection changes.
     ControlLabel("Your EQs")
     val newSelected = custom && activeSaved == null && origin == null
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(Spacing.s)) {
         (saved + null).chunked(2).forEach { row ->
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(Spacing.s)) {
                 row.forEach { p ->
                     Box(Modifier.weight(1f)) {
                         if (p == null) {
@@ -189,7 +190,7 @@ internal fun EqSection(s: SpeakerState, speaker: SpeakerController, store: EqPre
         }
         EqGraph(bands, onChange = speaker::setCustomEq)
         when {
-            editing != null -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+            editing != null -> Row(horizontalArrangement = Arrangement.spacedBy(Spacing.s), modifier = Modifier.fillMaxWidth()) {
                 Button(onClick = { origin = store.update(editing, bands) }, modifier = Modifier.weight(1f)) {
                     Text("Update ${editing.name}", maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
@@ -204,21 +205,15 @@ internal fun EqSection(s: SpeakerState, speaker: SpeakerController, store: EqPre
             ?: HintText("Pick a sound profile, or tap New EQ to shape your own.")
     }
 
-    val bandModel = BandModels.forModel(s.model)
-    TuneRoomRow(approximate = !bandModel.measured, onClick = { tuning = true })
-    if (tuning) RoomCorrectionWizard(s, speaker, store, bandModel, onDismiss = { tuning = false })
-    val calibrationCsv = File(LocalContext.current.getExternalFilesDir(null), "bandcal.csv")
-    DebugTool("Calibrate bands (debug)", speaker) { sp, meter, progress -> BandCalibration.run(sp, meter, calibrationCsv, progress) }
-    DebugTool("Probe AUX input (debug)", speaker, InputProbe::run)
 
     if (naming) {
-        PaletteNameDialog("Name your custom EQ", initial = "", confirm = "Save", placeholder = "My EQ", onDismiss = { naming = false }) {
+        NameDialog("Name your custom EQ", initial = "", confirm = "Save", maxLength = PaletteCodec.MAX_NAME, placeholder = "My EQ", onDismiss = { naming = false }) {
             origin = store.add(it, bands)
             naming = false
         }
     }
     renaming?.let { p ->
-        PaletteNameDialog("Rename custom EQ", p.name, "Rename", placeholder = "My EQ", onDismiss = { renaming = null }) {
+        NameDialog("Rename custom EQ", p.name, "Rename", PaletteCodec.MAX_NAME, placeholder = "My EQ", onDismiss = { renaming = null }) {
             val renamed = store.rename(p, it)
             if (origin == p) origin = renamed
             renaming = null
@@ -255,7 +250,7 @@ private fun ProfileTile(label: String, icon: ImageVector, selected: Boolean, onC
     val colors = MaterialTheme.colorScheme
     Column(
         modifier
-            .clip(RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(Corners.medium))
             .selectable(selected = selected, role = Role.RadioButton) {
                 if (!selected) haptics.performHapticFeedback(HapticFeedbackType.SegmentTick)
                 onClick()
@@ -266,8 +261,8 @@ private fun ProfileTile(label: String, icon: ImageVector, selected: Boolean, onC
             Modifier
                 .fillMaxWidth()
                 .height(56.dp)
-                .clip(RoundedCornerShape(12.dp))
-                .background(if (selected) colors.primary else colors.surfaceContainerHighest),
+                .clip(RoundedCornerShape(Corners.medium))
+                .background(if (selected) colors.primary else tileContainer),
             contentAlignment = Alignment.Center,
         ) {
             Icon(icon, contentDescription = null, tint = if (selected) colors.onPrimary else colors.onSurface, modifier = Modifier.size(26.dp))
@@ -278,7 +273,7 @@ private fun ProfileTile(label: String, icon: ImageVector, selected: Boolean, onC
             color = if (selected) colors.primary else colors.onSurface,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(top = 6.dp, bottom = 2.dp),
+            modifier = Modifier.padding(top = Spacing.s, bottom = 2.dp),
         )
     }
 }
@@ -299,7 +294,7 @@ private fun EqCard(
 ) {
     val haptics = LocalHapticFeedback.current
     val colors = MaterialTheme.colorScheme
-    val shape = RoundedCornerShape(12.dp)
+    val shape = RoundedCornerShape(Corners.medium)
     val content = when {
         selected -> colors.onSecondaryContainer
         outlined -> colors.primary
@@ -314,7 +309,7 @@ private fun EqCard(
                 when {
                     selected -> colors.secondaryContainer
                     outlined -> Color.Transparent
-                    else -> colors.surfaceContainerHigh
+                    else -> tileContainer
                 },
             )
             .border(
@@ -335,11 +330,11 @@ private fun EqCard(
                 onLongClickLabel = onLongClick?.let { "Rename or delete" },
             )
             .semantics { this.selected = selected }
-            .padding(horizontal = 12.dp),
+            .padding(horizontal = Spacing.m),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(Modifier.size(width = 28.dp, height = 20.dp), contentAlignment = Alignment.Center) { art(content) }
-        Spacer(Modifier.width(10.dp))
+        Spacer(Modifier.width(Spacing.s))
         Text(label, style = MaterialTheme.typography.labelLarge, color = content, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
     }
 }
@@ -351,7 +346,7 @@ private fun NewEqCard(selected: Boolean, onClick: () -> Unit) {
 }
 
 @Composable
-private fun EqSparkline(bands: List<Int>, color: Color, modifier: Modifier) {
+internal fun EqSparkline(bands: List<Int>, color: Color, modifier: Modifier) {
     Canvas(modifier) {
         val span = (EqCurve.MAX_DB - EqCurve.MIN_DB).toFloat()
         val path = eqPath(bands, { i -> i * size.width / (EqCurve.BANDS - 1) }, { db -> (EqCurve.MAX_DB - db) / span * size.height })
@@ -372,13 +367,13 @@ private fun eqPath(bands: List<Int>, x: (Int) -> Float, y: (Int) -> Float) = Pat
 /** Description, the official app's bass/mid/treble character bars side by side, and its battery estimate. */
 @Composable
 private fun ProfileDetails(p: SoundProfile) {
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(Spacing.m)) {
         p.description?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         val bars = listOf("Bass" to p.bass, "Mid" to p.mid, "Treble" to p.treble).filter { it.second != null }
         if (bars.isNotEmpty()) {
-            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(Spacing.l)) {
                 bars.forEach { (label, value) ->
-                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Spacing.s)) {
                         ControlLabel(label)
                         LinearProgressIndicator(progress = { value!! / 100f }, modifier = Modifier.fillMaxWidth(), drawStopIndicator = {})
                     }
@@ -388,44 +383,58 @@ private fun ProfileDetails(p: SoundProfile) {
         p.batteryHours?.let { hours ->
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Default.Battery5Bar, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(6.dp))
+                Spacer(Modifier.width(Spacing.s))
                 HintText("About $hours hrs of battery at max volume")
             }
         }
     }
 }
 
+/**
+ * Room tuning on its own card under the EQ, opening the wizard as a page, with the debug builds'
+ * measurement tools underneath.
+ */
 @Composable
-private fun TuneRoomRow(approximate: Boolean, onClick: () -> Unit) {
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
-            .clickable(onClick = onClick)
-            .padding(12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        IconBadge(Icons.Default.Mic, size = 40.dp, iconSize = 20.dp)
-        Spacer(Modifier.width(12.dp))
-        Column(Modifier.weight(1f)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Tune to this room", style = MaterialTheme.typography.titleSmall)
-                if (approximate) {
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        "Approx.",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier
-                            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(4.dp))
-                            .padding(horizontal = 5.dp, vertical = 1.dp),
-                    )
+internal fun RoomTuning(s: SpeakerState, speaker: SpeakerController, store: EqPresetStore) {
+    var tuning by remember { mutableStateOf(false) }
+    val bandModel = BandModels.forModel(s.model)
+    TuneRoomCard(approximate = !bandModel.measured, onClick = { tuning = true })
+    if (tuning) RoomCorrectionWizard(s, speaker, store, bandModel, onDismiss = { tuning = false })
+    val context = LocalContext.current
+    if (context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE == 0) return
+    val calibrationCsv = File(context.getExternalFilesDir(null), "bandcal.csv")
+    // Kept together, so they don't each take the page's spacing between cards.
+    Column {
+        DebugTool("Calibrate bands (debug)", speaker) { sp, meter, progress -> BandCalibration.run(sp, meter, calibrationCsv, progress) }
+        DebugTool("Probe AUX input (debug)", speaker, InputProbe::run)
+    }
+}
+
+@Composable
+private fun TuneRoomCard(approximate: Boolean, onClick: () -> Unit) {
+    Card(onClick = onClick, modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = cardContainer)) {
+        Row(Modifier.padding(Spacing.l), verticalAlignment = Alignment.CenterVertically) {
+            IconBadge(Icons.Default.Mic, size = 40.dp, iconSize = 20.dp)
+            Spacer(Modifier.width(Spacing.m))
+            Column(Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Tune to this room", style = MaterialTheme.typography.titleSmall)
+                    if (approximate) {
+                        Spacer(Modifier.width(Spacing.s))
+                        Text(
+                            "Approx.",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier
+                                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(4.dp))
+                                .padding(horizontal = 5.dp, vertical = 1.dp),
+                        )
+                    }
                 }
+                HintText("Measure with your phone and get an EQ that evens out the room.")
             }
-            HintText("Measure with your phone and get an EQ that evens out the room.")
+            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
@@ -448,7 +457,7 @@ internal fun EqGraph(bands: List<Int>, onChange: ((List<Int>) -> Unit)?) {
     Column {
         Row(Modifier.fillMaxWidth().height(220.dp)) {
             // Labels sit on the +10, 0 and -10 grid lines, which the canvas insets by 12 dp.
-            Column(Modifier.width(axisWidth).fillMaxHeight().padding(vertical = 4.dp), verticalArrangement = Arrangement.SpaceBetween) {
+            Column(Modifier.width(axisWidth).fillMaxHeight().padding(vertical = Spacing.xs), verticalArrangement = Arrangement.SpaceBetween) {
                 listOf("+10 dB", "0", "−10 dB").forEach { Text(it, style = MaterialTheme.typography.labelSmall, color = colors.onSurfaceVariant) }
             }
             Canvas(
@@ -538,7 +547,7 @@ internal fun EqGraph(bands: List<Int>, onChange: ((List<Int>) -> Unit)?) {
     }
 }
 
-/** Debug builds only: runs a measurement tool against the connected speaker, showing its progress. */
+/** Runs a measurement tool against the connected speaker, showing its progress; [RoomTuning] shows these in debug builds only. */
 @Composable
 private fun DebugTool(
     label: String,
@@ -546,7 +555,6 @@ private fun DebugTool(
     tool: suspend (SpeakerController, RoomMeter, (String) -> Unit) -> Unit,
 ) {
     val context = LocalContext.current
-    if (context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE == 0) return
     val scope = rememberCoroutineScope()
     var progress by remember { mutableStateOf<String?>(null) }
     var running by remember { mutableStateOf(false) }

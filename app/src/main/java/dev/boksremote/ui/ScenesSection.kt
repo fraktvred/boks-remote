@@ -60,18 +60,9 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.material.icons.filled.DragHandle
-import androidx.compose.runtime.key
-import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.rememberUpdatedState
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.semantics.CustomAccessibilityAction
-import androidx.compose.ui.semantics.customActions
-import androidx.compose.ui.zIndex
-import androidx.compose.ui.graphics.graphicsLayer
-import dev.boksremote.BoksApp
+import dev.boksremote.speaker.PaletteCodec
+import dev.boksremote.DevicePanel
 import dev.boksremote.speaker.CycleStatus
 import dev.boksremote.speaker.Scene
 import dev.boksremote.speaker.SpeakerState
@@ -82,96 +73,34 @@ private val SCENE_ROW_HEIGHT = 64.dp
 private val SCENE_ROW_GAP = 4.dp
 
 /**
- * The scenes in their order, each [row] given the modifier for its drag handle: dragging lifts the
- * row and moves it a place each time it passes half a row. A lone scene has nothing to move past, so
- * it gets no handle (null).
- */
-@Composable
-private fun ReorderableScenes(scenes: List<Scene>, onMove: (from: Int, to: Int) -> Unit, row: @Composable (Scene, Modifier?) -> Unit) {
-    val stepPx = with(LocalDensity.current) { (SCENE_ROW_HEIGHT + SCENE_ROW_GAP).toPx() }
-    val haptics = LocalHapticFeedback.current
-    val latest by rememberUpdatedState(scenes)
-    val move by rememberUpdatedState(onMove)
-    var dragging by remember { mutableStateOf<String?>(null) }
-    var offset by remember { mutableFloatStateOf(0f) }
-
-    scenes.forEachIndexed { i, scene ->
-        // Keyed by name so the row, and the drag in progress on it, follows the scene to its new place.
-        key(scene.name) {
-            val lifted = dragging == scene.name
-            Box(
-                Modifier
-                    .zIndex(if (lifted) 1f else 0f)
-                    .graphicsLayer {
-                        translationY = if (lifted) offset else 0f
-                        shadowElevation = if (lifted) 6.dp.toPx() else 0f
-                        shape = RoundedCornerShape(12.dp)
-                    }
-                    .semantics {
-                        customActions = listOfNotNull(
-                            if (i > 0) CustomAccessibilityAction("Move up") { onMove(i, i - 1); true } else null,
-                            if (i < scenes.lastIndex) CustomAccessibilityAction("Move down") { onMove(i, i + 1); true } else null,
-                        )
-                    },
-            ) {
-                val handle = Modifier.pointerInput(scene.name) {
-                    detectDragGestures(
-                        onDragStart = {
-                            dragging = scene.name
-                            offset = 0f
-                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                        },
-                        onDragEnd = { dragging = null; offset = 0f },
-                        onDragCancel = { dragging = null; offset = 0f },
-                    ) { change, amount ->
-                        change.consume()
-                        offset += amount.y
-                        val at = latest.indexOfFirst { it.name == scene.name }
-                        if (offset > stepPx / 2 && at < latest.lastIndex) {
-                            move(at, at + 1)
-                            offset -= stepPx
-                            haptics.performHapticFeedback(HapticFeedbackType.SegmentTick)
-                        } else if (offset < -stepPx / 2 && at > 0) {
-                            move(at, at - 1)
-                            offset += stepPx
-                            haptics.performHapticFeedback(HapticFeedbackType.SegmentTick)
-                        }
-                    }
-                }
-                row(scene, handle.takeIf { scenes.size > 1 })
-            }
-        }
-    }
-}
-
-/**
  * The scene and the light's colours as one card: the scene applied last on top, tapped to open every
  * scene in a sheet, where they are switched to, renamed or deleted, and [colours] beneath it, since the
  * light's colours are part of the scene in use. Keeps the device screen short however many scenes there are.
  */
 @Composable
-fun ScenesSection(s: SpeakerState, app: BoksApp, colours: @Composable () -> Unit) {
-    val scenes by app.scenes.scenes.collectAsState()
-    val activeName by app.session.active.collectAsState()
-    val live by app.session.live.collectAsState()
-    val cycle by app.cycle.status.collectAsState()
+fun ScenesSection(s: SpeakerState, panel: DevicePanel, colours: @Composable () -> Unit) {
+    val scenes by panel.workspace.scenes.scenes.collectAsState()
+    val stage = panel.stage
+    val activeName by stage.scenes.active.collectAsState()
+    val live by stage.scenes.live.collectAsState()
+    val cycle by stage.cycle.status.collectAsState()
     var browsing by remember { mutableStateOf(false) }
     var naming by remember { mutableStateOf(false) }
     var renaming by remember { mutableStateOf<Scene?>(null) }
     val canSave = s.brightness != null && s.energyLevel != null
     // The scene in use follows Cycle, so its Cycle is the one running.
     fun playing(scene: Scene) = (cycle as? CycleStatus.Running)?.takeIf { scene.name == activeName }
-    fun position(scene: Scene) = if (playing(scene) != null) app.cycle.position() else 0
+    fun position(scene: Scene) = if (playing(scene) != null) stage.cycle.position() else 0
     val active = scenes.firstOrNull { it.name == activeName }
     // The light as it is now, rather than as last saved, so a change or a Cycle step shows at once.
     val shown = active?.let { live?.takeIf { it.name == active.name } ?: active }
 
-    Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
+    Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = cardContainer)) {
         if (scenes.isEmpty()) {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(Modifier.padding(Spacing.l), verticalArrangement = Arrangement.spacedBy(Spacing.m)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     IconBadge(Icons.Default.Bookmarks, size = 40.dp)
-                    Spacer(Modifier.width(12.dp))
+                    Spacer(Modifier.width(Spacing.m))
                     Text("Scenes", style = MaterialTheme.typography.titleMedium)
                 }
                 HintText("Save this look, colours and Cycle included, to bring it back with one tap. A scene keeps your changes by itself.")
@@ -199,23 +128,23 @@ fun ScenesSection(s: SpeakerState, app: BoksApp, colours: @Composable () -> Unit
             playing = ::playing,
             position = ::position,
             canSave = canSave,
-            onApply = { app.session.apply(it); browsing = false },
+            onApply = { stage.applyScene(it); browsing = false },
             onRename = { renaming = it },
-            onDelete = app.session::delete,
-            onMove = app.scenes::move,
+            onDelete = stage.scenes::delete,
+            onMove = panel.workspace.scenes::move,
             onSaveNew = { naming = true },
             onDismiss = { browsing = false },
         )
     }
     if (naming) {
-        PaletteNameDialog(if (active == null) "Save as scene" else "New scene", app.scenes.suggestName(), "Save", placeholder = "Scene", onDismiss = { naming = false }) { name ->
-            app.session.save(name)
+        NameDialog(if (active == null) "Save as scene" else "New scene", panel.workspace.scenes.suggestName(), "Save", PaletteCodec.MAX_NAME, placeholder = "Scene", onDismiss = { naming = false }) { name ->
+            stage.scenes.save(name)
             naming = false
         }
     }
     renaming?.let { scene ->
-        PaletteNameDialog("Rename scene", scene.name, "Rename", placeholder = "Scene", onDismiss = { renaming = null }) { name ->
-            app.session.rename(scene, name)
+        NameDialog("Rename scene", scene.name, "Rename", PaletteCodec.MAX_NAME, placeholder = "Scene", onDismiss = { renaming = null }) { name ->
+            stage.scenes.rename(scene, name)
             renaming = null
         }
     }
@@ -241,14 +170,14 @@ private fun SceneCover(active: Scene?, playing: CycleStatus.Running?, position: 
         if (active != null) {
             PaletteArt(active.palette?.colors ?: DEFAULT_ART, Modifier.matchParentSize())
             // Darkest under the text, so the name reads on a yellow or white palette too.
-            Box(Modifier.matchParentSize().background(Brush.horizontalGradient(listOf(Color.Black.copy(alpha = 0.62f), Color.Black.copy(alpha = 0.22f)))))
+            Box(Modifier.matchParentSize().background(Brush.horizontalGradient(Scrim.cover)))
         }
         val text = if (cover) Color.White else MaterialTheme.colorScheme.onSurface
-        val subtle = if (cover) Color.White.copy(alpha = 0.82f) else MaterialTheme.colorScheme.onSurfaceVariant
-        Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 18.dp, bottom = 18.dp), verticalAlignment = Alignment.CenterVertically) {
+        val subtle = if (cover) OnArt.subtle else MaterialTheme.colorScheme.onSurfaceVariant
+        Row(Modifier.fillMaxWidth().padding(start = Spacing.l, end = Spacing.m, top = Spacing.xl, bottom = Spacing.xl), verticalAlignment = Alignment.CenterVertically) {
             if (active == null) {
                 IconBadge(Icons.Default.Bookmarks, size = 40.dp)
-                Spacer(Modifier.width(12.dp))
+                Spacer(Modifier.width(Spacing.m))
             }
             Column(Modifier.weight(1f)) {
                 Text(active?.name ?: "No scene applied", style = MaterialTheme.typography.titleMedium, color = text, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -261,8 +190,18 @@ private fun SceneCover(active: Scene?, playing: CycleStatus.Running?, position: 
                 )
             }
             save()
-            playing?.nextAt?.let { Countdown(it, tint = if (cover) Color.White else MaterialTheme.colorScheme.primary) }
-            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = subtle)
+            playing?.nextAt?.let {
+                // On a pill of its own, so it reads wherever the palette behind it is lightest.
+                val pill = if (cover) Modifier.clip(RoundedCornerShape(50)).background(Scrim.chip) else Modifier
+                Box(pill.padding(horizontal = Spacing.s, vertical = Spacing.xs)) { Countdown(it, tint = if (cover) Color.White else MaterialTheme.colorScheme.primary) }
+            }
+            // The whole row opens the scenes; the chevron only says so.
+            Icon(
+                Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = null,
+                tint = if (cover) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = Spacing.xs, end = Spacing.xs),
+            )
         }
     }
 }
@@ -283,8 +222,8 @@ private fun ScenesSheet(
     onDismiss: () -> Unit,
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss, modifier = Modifier.sheetTopMargin()) {
-        Column(Modifier.verticalScroll(rememberScrollState()).navigationBarsPadding().padding(start = 16.dp, end = 16.dp, bottom = 16.dp)) {
-            Row(Modifier.fillMaxWidth().padding(start = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.verticalScroll(rememberScrollState()).navigationBarsPadding().padding(start = Spacing.l, end = Spacing.l, bottom = Spacing.l)) {
+            Row(Modifier.fillMaxWidth().padding(start = Spacing.s, bottom = Spacing.s), verticalAlignment = Alignment.CenterVertically) {
                 Text("Scenes", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
                 TextButton(onClick = onSaveNew, enabled = canSave) {
                     Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
@@ -293,19 +232,20 @@ private fun ScenesSheet(
                 }
             }
             Column(verticalArrangement = Arrangement.spacedBy(SCENE_ROW_GAP)) {
-                ReorderableScenes(scenes, onMove) { scene, handle ->
+                ReorderableColumn(scenes, { it.name }, SCENE_ROW_HEIGHT + SCENE_ROW_GAP, onMove, RoundedCornerShape(Corners.medium)) { scene, handle, _ ->
                     SceneRow(
                         scene,
                         playing = playing(scene),
                         position = position(scene),
-                        handle = handle,
+                        // A lone scene has nothing to move past, so it gets no handle.
+                        handle = handle.takeIf { scenes.size > 1 },
                         onApply = { onApply(scene) },
                         onRename = { onRename(scene) },
                         onDelete = { onDelete(scene) },
                     )
                 }
             }
-            HintText("Tap to switch. The scene in use saves your changes by itself.", Modifier.padding(start = 8.dp, top = 12.dp))
+            HintText("Tap to switch. The scene in use saves your changes by itself.", Modifier.padding(start = Spacing.s, top = Spacing.m))
         }
     }
 }
@@ -323,16 +263,16 @@ private fun sceneStatus(scene: Scene, playing: CycleStatus.Running?, position: I
 
 /** Time to Cycle's next palette, beside its icon. */
 @Composable
-private fun Countdown(nextAt: Long, tint: Color = MaterialTheme.colorScheme.primary) {
+internal fun Countdown(nextAt: Long, tint: Color = MaterialTheme.colorScheme.primary) {
     val left by produceState(0L, nextAt) {
         while (true) {
             value = (nextAt - SystemClock.elapsedRealtime()).coerceAtLeast(0) / 1000
             delay(250)
         }
     }
-    Row(Modifier.padding(horizontal = 4.dp).semantics(mergeDescendants = true) {}, verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.padding(horizontal = Spacing.xs).semantics(mergeDescendants = true) {}, verticalAlignment = Alignment.CenterVertically) {
         Icon(Icons.Default.Autorenew, contentDescription = "Next palette in", tint = tint, modifier = Modifier.size(16.dp))
-        Spacer(Modifier.width(4.dp))
+        Spacer(Modifier.width(Spacing.xs))
         Text("${left / 60}:${(left % 60).toString().padStart(2, '0')}", style = MaterialTheme.typography.labelLarge, color = tint)
     }
 }
@@ -358,8 +298,8 @@ private fun SceneRow(
         Modifier
             .fillMaxWidth()
             .height(SCENE_ROW_HEIGHT)
-            .clip(RoundedCornerShape(12.dp))
-            .background(if (playing != null) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh)
+            .clip(RoundedCornerShape(Corners.medium))
+            .background(if (playing != null) MaterialTheme.colorScheme.secondaryContainer else cardContainer)
             .combinedClickable(
                 onClickLabel = "Apply",
                 onClick = onApply,
@@ -372,12 +312,12 @@ private fun SceneRow(
             Box(handle.size(40.dp, SCENE_ROW_HEIGHT), contentAlignment = Alignment.Center) {
                 Icon(Icons.Default.DragHandle, contentDescription = "Drag to reorder", tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-        } else Spacer(Modifier.width(12.dp))
+        } else Spacer(Modifier.width(Spacing.m))
         PaletteArt(
             scene.palette?.colors ?: DEFAULT_ART,
-            Modifier.width(52.dp).height(40.dp).clip(RoundedCornerShape(8.dp)).border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(8.dp)),
+            Modifier.width(52.dp).height(40.dp).clip(RoundedCornerShape(Corners.small)).border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(Corners.small)),
         )
-        Spacer(Modifier.width(12.dp))
+        Spacer(Modifier.width(Spacing.m))
         Column(Modifier.weight(1f)) {
             Text(scene.name, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
             val status = sceneStatus(scene, playing, position)

@@ -3,17 +3,22 @@ package dev.boksremote
 import dev.boksremote.speaker.ConnectionState
 import dev.boksremote.speaker.EnergyLevel
 import dev.boksremote.speaker.Light
+import dev.boksremote.speaker.LightContentCodec
+import dev.boksremote.speaker.LightFx
+import dev.boksremote.speaker.LightOutput
 import dev.boksremote.speaker.LightPalette
 import dev.boksremote.speaker.SpeakerState
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
+import java.util.UUID
 
 /**
  * A Lightboks that takes every write at once and records it in [writes]: a palette by name,
  * "default" for the light's own colours, "fade:name" for a fade's start and "off". While [refusing],
  * light mode and palette writes fail the way Android refuses them when busy: recorded as "refused",
- * and the light stays as it was.
+ * and the light stays as it was. What goes through [output] is recorded as "fx:Name" ("fx:none" to
+ * stop one), "brightness:n", "mode:LEVEL" and "palette:name".
  */
 class FakeLight(
     connected: Boolean = true,
@@ -62,5 +67,26 @@ class FakeLight(
 
     override fun powerOff() {
         writes += "off"
+    }
+
+    override val output = object : LightOutput {
+        override suspend fun applyFx(id: UUID) {
+            writes += "fx:" + (LightFx.entries.firstOrNull { it.id == id }?.name ?: if (id == LightContentCodec.NO_ID) "none" else id.toString())
+        }
+
+        override suspend fun applyBrightness(value: Int) {
+            writes += "brightness:$value"
+            state.update { it.copy(brightness = value) }
+        }
+
+        override suspend fun applyEnergyLevel(level: EnergyLevel) {
+            writes += "mode:$level"
+            state.update { it.copy(energyLevel = level) }
+        }
+
+        override suspend fun applyPalette(palette: LightPalette, id: UUID) {
+            writes += "palette:${palette.name}"
+            state.update { it.copy(palette = palette, paletteIsDefault = false) }
+        }
     }
 }
