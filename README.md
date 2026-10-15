@@ -37,7 +37,6 @@ Bluetooth LE only, with no account and no cloud.</p>
   <img src="docs/screenshots/room-tuning.png" width="160" alt="Room tuning wizard">
   <img src="docs/screenshots/lightboks.png" width="160" alt="Lightboks screen with brightness, light mode, the scene in use and its colours">
   <img src="docs/screenshots/palette-editor.png" width="160" alt="Palette editor with a live preview on the light">
-  <img src="docs/screenshots/dmx-bridge.png" width="160" alt="Effects pad and DMX bridge">
 </p>
 
 ## Install
