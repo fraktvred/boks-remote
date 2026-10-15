@@ -1,5 +1,6 @@
 package dev.boksremote
 
+import dev.boksremote.protocol.Family
 import dev.boksremote.speaker.CycleConfig
 import dev.boksremote.speaker.CycleConfigStore
 import dev.boksremote.speaker.CycleSnapshot
@@ -16,6 +17,7 @@ import dev.boksremote.speaker.SceneStore
 import dev.boksremote.speaker.SleepFade
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
@@ -175,5 +177,47 @@ class SceneSessionTest {
         after(3_000)
         assertEquals(EnergyLevel.HIGH, s.saved("Calm").level)
         assertEquals(ocean, s.saved("Calm").palette)
+    }
+
+    /** A connected Lightboks that answers RPC, as the first-scene check wants. */
+    private fun FakeLight.asLightboks() = apply { state.update { it.copy(family = Family.LIGHT, rpcAvailable = true) } }
+
+    @Test
+    fun theFirstLightboksConnectedStartsWithItsLookAsTheSceneInUse() = runTest {
+        val s = setup(FakeLight(connected = false).asLightboks())
+        s.session.connecting()
+        s.light.connect()
+        after(0)
+        assertEquals(listOf(Scene("Default Scene", 200, EnergyLevel.MEDIUM, null, s.cycle.snapshot())), s.scenes.scenes.value)
+        assertEquals("Default Scene", s.session.active.value)
+        // It is a scene like any other: a change goes into it.
+        s.session.setBrightness(90)
+        after(3_000)
+        assertEquals(90, s.saved("Default Scene").brightness)
+    }
+
+    @Test
+    fun aDeletedFirstSceneIsNotMadeAgain() = runTest {
+        val s = setup(FakeLight(connected = false).asLightboks())
+        s.session.connecting()
+        s.light.connect()
+        after(0)
+        s.session.delete(s.saved("Default Scene"))
+        s.light.connect(false)
+        s.session.connecting()
+        s.light.connect()
+        after(0)
+        assertEquals(emptyList<Scene>(), s.scenes.scenes.value)
+    }
+
+    @Test
+    fun noFirstSceneWhereThereAreScenesAlready() = runTest {
+        val s = setup(FakeLight(connected = false).asLightboks())
+        s.scenes.add(Scene("Calm", 60, EnergyLevel.LOW, ocean))
+        s.scenes.delete(s.saved("Calm"))
+        s.session.connecting()
+        s.light.connect()
+        after(0)
+        assertEquals(emptyList<Scene>(), s.scenes.scenes.value)
     }
 }

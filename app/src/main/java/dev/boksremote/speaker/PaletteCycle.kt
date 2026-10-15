@@ -92,6 +92,9 @@ class PaletteCycle(
     val config: StateFlow<CycleConfig> = _config
     private val _status = MutableStateFlow<CycleStatus>(CycleStatus.Stopped)
     val status: StateFlow<CycleStatus> = _status
+    private val _largePreviews = MutableStateFlow(store.largePreviews)
+    /** See [CycleConfigStore.largePreviews]. */
+    val largePreviews: StateFlow<Boolean> = _largePreviews
     private val _lent = MutableStateFlow(false)
     /** True while the light is lent to the DMX bridge: Cycle waits paused and won't start. */
     val lent: StateFlow<Boolean> = _lent
@@ -114,6 +117,11 @@ class PaletteCycle(
 
     /** 1-based place of the palette playing in [palettes], or 0. */
     fun position(): Int = palettes().indexOfFirst { it.name == _status.value.current } + 1
+
+    fun setLargePreviews(on: Boolean) {
+        _largePreviews.value = on
+        store.largePreviews = on
+    }
 
     fun update(config: CycleConfig) {
         val old = _config.value

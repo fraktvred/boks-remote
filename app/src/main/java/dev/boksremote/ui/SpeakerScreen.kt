@@ -35,7 +35,6 @@ import androidx.compose.material.icons.filled.Battery6Bar
 import androidx.compose.material.icons.filled.BatteryFull
 import androidx.compose.material.icons.filled.Bedtime
 import androidx.compose.material.icons.filled.BluetoothDisabled
-import androidx.compose.material.icons.filled.BrightnessMedium
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Equalizer
 import androidx.compose.material.icons.filled.Groups
@@ -262,12 +261,15 @@ private fun Controls(s: SpeakerState, speaker: SpeakerController, app: BoksApp) 
             }
         }
     }
-    s.brightness?.let { brightness ->
-        // Moving the slider takes over from a running fade.
-        LevelCard("Brightness", Icons.Default.BrightnessMedium, brightness, app.session::setBrightness)
-    }
-    s.energyLevel?.let { level ->
-        SectionCard("Light mode", Icons.Default.Lightbulb) { LightModePicker(level, speaker::setEnergyLevel) }
+    val brightness = s.brightness
+    if (brightness != null) {
+        // Drawn in the light's colours, or a neutral stand-in while it runs its defaults. Moving the fader takes over from a running fade.
+        val colors = s.palette?.takeUnless { s.paletteIsDefault }?.colors ?: DEFAULT_ART
+        LightLookCard(brightness, colors, s.energyLevel, app.session::setBrightness, speaker::setEnergyLevel)
+    } else {
+        s.energyLevel?.let { level ->
+            SectionCard("Light mode", Icons.Default.Lightbulb) { LightModePicker(level, speaker::setEnergyLevel) }
+        }
     }
     if (s.family == Family.LIGHT && s.rpcAvailable) {
         ScenesSection(s, app) { PaletteSection(s, speaker, app.palettes, app.cycle) }
@@ -288,6 +290,7 @@ private fun Controls(s: SpeakerState, speaker: SpeakerController, app: BoksApp) 
     }
     if (s.eq != null || (s.family == Family.BIFROST && s.rpcAvailable)) {
         SectionCard("Sound profiles & EQ", Icons.Default.Equalizer) { EqSection(s, speaker, app.eqPresets) }
+        RoomTuning(s, speaker, app.eqPresets)
     }
     if (s.teamUp != null || s.stereoRole != null) {
         SectionCard("Team-up", Icons.Default.Groups) {
@@ -356,9 +359,9 @@ private fun autoOffLabel(minutes: Int) = when {
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun DeviceHeader(s: SpeakerState, demo: Boolean) {
-    Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-        DeviceBadge(s.family, size = 64.dp)
-        Spacer(Modifier.width(16.dp))
+    Row(Modifier.fillMaxWidth().padding(start = 4.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        DeviceBadge(s.family, size = 52.dp)
+        Spacer(Modifier.width(14.dp))
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(s.model?.label ?: "SOUNDBOKS device", style = MaterialTheme.typography.titleMedium)
             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {

@@ -49,8 +49,11 @@ class BoksApp : Application() {
     // A getter: SharedPreferences are not readable yet while the Application is being constructed.
     val dmxConfig: StateFlow<DmxConfig> get() = _dmxConfig
 
-    private val _demoMode = MutableStateFlow(false)
-    /** Demo mode lists a dummy of each device. Not kept across restarts, so neither is anything done in it. */
+    private val _demoMode = MutableStateFlow(BuildConfig.DEBUG)
+    /**
+     * Demo mode lists a dummy of each device. Not kept across restarts, so neither is anything done in
+     * it; a debug build starts with it on.
+     */
     val demoMode: StateFlow<Boolean> = _demoMode
     /** Demo mode's dummies and their own set, made when a dummy is first opened. */
     private var demo: Demo? = null

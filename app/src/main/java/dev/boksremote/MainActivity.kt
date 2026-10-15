@@ -22,6 +22,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LifecycleResumeEffect
@@ -78,6 +79,11 @@ private fun App(app: BoksApp) {
 @Composable
 private fun AppTheme(content: @Composable () -> Unit) {
     val context = LocalContext.current
-    val scheme = if (isSystemInDarkTheme()) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+    val scheme = if (isSystemInDarkTheme()) {
+        // A charcoal page rather than near-black, so page, cards and the tiles on them climb in even steps.
+        dynamicDarkColorScheme(context).let { val page = lerp(it.surface, it.surfaceContainerLow, 0.5f); it.copy(background = page, surface = page) }
+    } else {
+        dynamicLightColorScheme(context)
+    }
     MaterialTheme(colorScheme = scheme, content = content)
 }

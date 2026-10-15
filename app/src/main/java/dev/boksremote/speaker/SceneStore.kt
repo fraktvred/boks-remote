@@ -29,6 +29,7 @@ class SceneStore(private val kv: KeyValue) : PaletteLibrary.User {
     fun add(scene: Scene): Scene {
         val named = scene.copy(name = uniqueName(scene.name))
         write(_scenes.value + named)
+        seeded = true
         return named
     }
 
@@ -44,6 +45,14 @@ class SceneStore(private val kv: KeyValue) : PaletteLibrary.User {
     fun delete(scene: Scene) = write(_scenes.value.filterNot { it.name == scene.name })
 
     fun suggestName(): String = uniqueName("Scene")
+
+    /**
+     * True once there has been a scene here, made by the user or as the first one on connecting; from
+     * then on, deleting every scene leaves none rather than making a new first one.
+     */
+    var seeded: Boolean
+        get() = kv[KEY_SEEDED] != null || _scenes.value.isNotEmpty()
+        set(value) { kv[KEY_SEEDED] = if (value) "1" else null }
 
     /** The scene in use, by name, kept across app restarts. */
     var active: String?
@@ -89,6 +98,7 @@ class SceneStore(private val kv: KeyValue) : PaletteLibrary.User {
     private companion object {
         const val KEY = "saved"
         const val KEY_ACTIVE = "active"
+        const val KEY_SEEDED = "seeded"
     }
 }
 

@@ -272,7 +272,7 @@ private fun DeviceRow(ad: Advertisement, modifier: Modifier, demo: Boolean = fal
     Card(
         onClick = onClick,
         modifier = modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = colors.surfaceContainerLow),
+        colors = CardDefaults.cardColors(containerColor = cardContainer),
     ) {
         Row(Modifier.padding(horizontal = 16.dp, vertical = 20.dp), verticalAlignment = Alignment.CenterVertically) {
             DeviceBadge(ad.family, size = 56.dp)

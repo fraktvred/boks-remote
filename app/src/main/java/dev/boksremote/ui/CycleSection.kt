@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -82,6 +83,7 @@ import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
@@ -101,13 +103,18 @@ fun CycleSection(app: BoksApp, speaker: SpeakerController) {
     val config by cycle.config.collectAsState()
     val saved by app.palettes.palettes.collectAsState()
     val lent by cycle.lent.collectAsState()
+    val large by cycle.largePreviews.collectAsState()
     val palettes = remember(config, saved) { cycle.palettes() }
     var editing by remember { mutableStateOf(false) }
     // Ask once so the "cycling" notice is visible; start either way.
     val notifications = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { cycle.start(speaker) }
     val canStart = remember(palettes, lent) { cycle.canStart() }
 
-    if (palettes.isNotEmpty()) CycleStrip(palettes, status.current.takeIf { status.showing }, paused = !status.running, enabled = !lent) { cycle.jumpTo(speaker, it.name) }
+    if (palettes.isNotEmpty()) {
+        val current = status.current.takeIf { status.showing }
+        if (large) CycleGrid(palettes, current, paused = !status.running, enabled = !lent) { cycle.jumpTo(speaker, it.name) }
+        else CycleStrip(palettes, current, paused = !status.running, enabled = !lent) { cycle.jumpTo(speaker, it.name) }
+    }
     val every = CycleConfig.intervalLabel(config.intervalSeconds)
     val s = status
     when {
@@ -167,6 +174,8 @@ fun CycleSection(app: BoksApp, speaker: SpeakerController) {
     if (editing) {
         CycleEditorSheet(
             config = config,
+            largePreviews = large,
+            onLargePreviews = cycle::setLargePreviews,
             inCycle = palettes,
             available = app.palettes.all().filter { p -> palettes.none { it.name == p.name } },
             savedNames = saved.map { it.name }.toSet(),
@@ -205,15 +214,61 @@ private fun CycleStrip(palettes: List<LightPalette>, current: String?, paused: B
     }
 }
 
-private fun Modifier.tileOutline(color: Color, dashed: Boolean): Modifier =
-    if (!dashed) border(2.dp, color, RoundedCornerShape(8.dp)) else drawBehind {
+private const val GRID_COLUMNS = 3
+
+/**
+ * The cycle's palettes as large tiles with their names, three to a row in play order; the one on the
+ * light is outlined as in [CycleStrip]. Tapping one shows it.
+ */
+@Composable
+private fun CycleGrid(palettes: List<LightPalette>, current: String?, paused: Boolean, enabled: Boolean, onPick: (LightPalette) -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        palettes.chunked(GRID_COLUMNS).forEach { row ->
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                row.forEach { p ->
+                    val on = p.name == current
+                    Column(
+                        Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(12.dp))
+                            .clickable(enabled = enabled, onClickLabel = "Show ${p.name}") { onPick(p) },
+                    ) {
+                        PaletteArt(
+                            p.colors,
+                            Modifier
+                                .fillMaxWidth()
+                                .aspectRatio(1.4f)
+                                .clip(RoundedCornerShape(12.dp))
+                                .then(if (on) Modifier.tileOutline(MaterialTheme.colorScheme.primary, dashed = paused, corner = 12.dp) else Modifier)
+                                .padding(if (on) 4.dp else 0.dp)
+                                .clip(RoundedCornerShape(if (on) 8.dp else 12.dp)),
+                        )
+                        Text(
+                            p.name,
+                            style = MaterialTheme.typography.labelLarge,
+                            color = if (on) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(start = 2.dp, top = 6.dp, bottom = 2.dp),
+                        )
+                    }
+                }
+                // Keeps a short last row's tiles the size of the others.
+                repeat(GRID_COLUMNS - row.size) { Spacer(Modifier.weight(1f)) }
+            }
+        }
+    }
+}
+
+private fun Modifier.tileOutline(color: Color, dashed: Boolean, corner: Dp = 8.dp): Modifier =
+    if (!dashed) border(2.dp, color, RoundedCornerShape(corner)) else drawBehind {
         val width = 2.dp.toPx()
         // The stroke is centred on its path, so the path sits half a stroke inside the tile.
         drawRoundRect(
             color,
             topLeft = Offset(width / 2, width / 2),
             size = Size(size.width - width, size.height - width),
-            cornerRadius = CornerRadius(8.dp.toPx() - width / 2),
+            cornerRadius = CornerRadius(corner.toPx() - width / 2),
             style = Stroke(width, pathEffect = PathEffect.dashPathEffect(floatArrayOf(5.dp.toPx(), 3.dp.toPx()))),
         )
     }
@@ -230,6 +285,8 @@ private val ROW_HEIGHT = 60.dp
 @Composable
 private fun CycleEditorSheet(
     config: CycleConfig,
+    largePreviews: Boolean,
+    onLargePreviews: (Boolean) -> Unit,
     inCycle: List<LightPalette>,
     available: List<LightPalette>,
     savedNames: Set<String>,
@@ -276,6 +333,12 @@ private fun CycleEditorSheet(
                                 onClick = { onChange(config.copy(transition = t)) },
                                 label = { Text(t.label) },
                             )
+                        }
+                    }
+                    ControlLabel("Previews in the card")
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf(false to "Small", true to "Large").forEach { (on, label) ->
+                            FilterChip(selected = largePreviews == on, onClick = { onLargePreviews(on) }, label = { Text(label) })
                         }
                     }
                     Row(verticalAlignment = Alignment.CenterVertically) {

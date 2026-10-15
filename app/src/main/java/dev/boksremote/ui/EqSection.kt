@@ -49,6 +49,8 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -138,7 +140,6 @@ internal fun EqSection(s: SpeakerState, speaker: SpeakerController, store: EqPre
     var naming by remember { mutableStateOf(false) }
     var renaming by remember { mutableStateOf<EqPreset?>(null) }
     var deleting by remember { mutableStateOf<EqPreset?>(null) }
-    var tuning by remember { mutableStateOf(false) }
 
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         profiles.forEach { p ->
@@ -204,12 +205,6 @@ internal fun EqSection(s: SpeakerState, speaker: SpeakerController, store: EqPre
             ?: HintText("Pick a sound profile, or tap New EQ to shape your own.")
     }
 
-    val bandModel = BandModels.forModel(s.model)
-    TuneRoomRow(approximate = !bandModel.measured, onClick = { tuning = true })
-    if (tuning) RoomCorrectionWizard(s, speaker, store, bandModel, onDismiss = { tuning = false })
-    val calibrationCsv = File(LocalContext.current.getExternalFilesDir(null), "bandcal.csv")
-    DebugTool("Calibrate bands (debug)", speaker) { sp, meter, progress -> BandCalibration.run(sp, meter, calibrationCsv, progress) }
-    DebugTool("Probe AUX input (debug)", speaker, InputProbe::run)
 
     if (naming) {
         PaletteNameDialog("Name your custom EQ", initial = "", confirm = "Save", placeholder = "My EQ", onDismiss = { naming = false }) {
@@ -267,7 +262,7 @@ private fun ProfileTile(label: String, icon: ImageVector, selected: Boolean, onC
                 .fillMaxWidth()
                 .height(56.dp)
                 .clip(RoundedCornerShape(12.dp))
-                .background(if (selected) colors.primary else colors.surfaceContainerHighest),
+                .background(if (selected) colors.primary else tileContainer),
             contentAlignment = Alignment.Center,
         ) {
             Icon(icon, contentDescription = null, tint = if (selected) colors.onPrimary else colors.onSurface, modifier = Modifier.size(26.dp))
@@ -314,7 +309,7 @@ private fun EqCard(
                 when {
                     selected -> colors.secondaryContainer
                     outlined -> Color.Transparent
-                    else -> colors.surfaceContainerHigh
+                    else -> tileContainer
                 },
             )
             .border(
@@ -395,37 +390,51 @@ private fun ProfileDetails(p: SoundProfile) {
     }
 }
 
+/**
+ * Room tuning on its own card under the EQ, opening the wizard as a page, with the debug builds'
+ * measurement tools underneath.
+ */
 @Composable
-private fun TuneRoomRow(approximate: Boolean, onClick: () -> Unit) {
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
-            .clickable(onClick = onClick)
-            .padding(12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        IconBadge(Icons.Default.Mic, size = 40.dp, iconSize = 20.dp)
-        Spacer(Modifier.width(12.dp))
-        Column(Modifier.weight(1f)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Tune to this room", style = MaterialTheme.typography.titleSmall)
-                if (approximate) {
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        "Approx.",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier
-                            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(4.dp))
-                            .padding(horizontal = 5.dp, vertical = 1.dp),
-                    )
+internal fun RoomTuning(s: SpeakerState, speaker: SpeakerController, store: EqPresetStore) {
+    var tuning by remember { mutableStateOf(false) }
+    val bandModel = BandModels.forModel(s.model)
+    TuneRoomCard(approximate = !bandModel.measured, onClick = { tuning = true })
+    if (tuning) RoomCorrectionWizard(s, speaker, store, bandModel, onDismiss = { tuning = false })
+    val context = LocalContext.current
+    if (context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE == 0) return
+    val calibrationCsv = File(context.getExternalFilesDir(null), "bandcal.csv")
+    // Kept together, so they don't each take the page's spacing between cards.
+    Column {
+        DebugTool("Calibrate bands (debug)", speaker) { sp, meter, progress -> BandCalibration.run(sp, meter, calibrationCsv, progress) }
+        DebugTool("Probe AUX input (debug)", speaker, InputProbe::run)
+    }
+}
+
+@Composable
+private fun TuneRoomCard(approximate: Boolean, onClick: () -> Unit) {
+    Card(onClick = onClick, modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = cardContainer)) {
+        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            IconBadge(Icons.Default.Mic, size = 40.dp, iconSize = 20.dp)
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Tune to this room", style = MaterialTheme.typography.titleSmall)
+                    if (approximate) {
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            "Approx.",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier
+                                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(4.dp))
+                                .padding(horizontal = 5.dp, vertical = 1.dp),
+                        )
+                    }
                 }
+                HintText("Measure with your phone and get an EQ that evens out the room.")
             }
-            HintText("Measure with your phone and get an EQ that evens out the room.")
+            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
@@ -538,7 +547,7 @@ internal fun EqGraph(bands: List<Int>, onChange: ((List<Int>) -> Unit)?) {
     }
 }
 
-/** Debug builds only: runs a measurement tool against the connected speaker, showing its progress. */
+/** Runs a measurement tool against the connected speaker, showing its progress; [RoomTuning] shows these in debug builds only. */
 @Composable
 private fun DebugTool(
     label: String,
@@ -546,7 +555,6 @@ private fun DebugTool(
     tool: suspend (SpeakerController, RoomMeter, (String) -> Unit) -> Unit,
 ) {
     val context = LocalContext.current
-    if (context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE == 0) return
     val scope = rememberCoroutineScope()
     var progress by remember { mutableStateOf<String?>(null) }
     var running by remember { mutableStateOf(false) }

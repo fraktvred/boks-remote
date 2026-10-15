@@ -166,7 +166,7 @@ fun ScenesSection(s: SpeakerState, app: BoksApp, colours: @Composable () -> Unit
     // The light as it is now, rather than as last saved, so a change or a Cycle step shows at once.
     val shown = active?.let { live?.takeIf { it.name == active.name } ?: active }
 
-    Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
+    Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = cardContainer)) {
         if (scenes.isEmpty()) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -245,7 +245,7 @@ private fun SceneCover(active: Scene?, playing: CycleStatus.Running?, position: 
         }
         val text = if (cover) Color.White else MaterialTheme.colorScheme.onSurface
         val subtle = if (cover) Color.White.copy(alpha = 0.82f) else MaterialTheme.colorScheme.onSurfaceVariant
-        Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 18.dp, bottom = 18.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 12.dp, top = 24.dp, bottom = 24.dp), verticalAlignment = Alignment.CenterVertically) {
             if (active == null) {
                 IconBadge(Icons.Default.Bookmarks, size = 40.dp)
                 Spacer(Modifier.width(12.dp))
@@ -261,8 +261,18 @@ private fun SceneCover(active: Scene?, playing: CycleStatus.Running?, position: 
                 )
             }
             save()
-            playing?.nextAt?.let { Countdown(it, tint = if (cover) Color.White else MaterialTheme.colorScheme.primary) }
-            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = subtle)
+            playing?.nextAt?.let {
+                // On a pill of its own, so it reads wherever the palette behind it is lightest.
+                val pill = if (cover) Modifier.clip(RoundedCornerShape(50)).background(Color.Black.copy(alpha = 0.45f)) else Modifier
+                Box(pill.padding(horizontal = 6.dp, vertical = 4.dp)) { Countdown(it, tint = if (cover) Color.White else MaterialTheme.colorScheme.primary) }
+            }
+            // The whole row opens the scenes; the chevron only says so.
+            Icon(
+                Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = null,
+                tint = if (cover) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 4.dp, end = 4.dp),
+            )
         }
     }
 }

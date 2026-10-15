@@ -1,5 +1,7 @@
 package dev.boksremote.ui
 
+import android.view.WindowManager
+
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -10,6 +12,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
@@ -26,54 +29,69 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.DriveFileRenameOutline
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.PrimaryTabRow
+import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.PlainTooltip
+import androidx.compose.material3.TooltipBox
+import androidx.compose.material3.TooltipDefaults
+import androidx.compose.material3.rememberTooltipState
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.LocalWindowInfo
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.DialogWindowProvider
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
 import dev.boksremote.speaker.HsvColor
 import dev.boksremote.speaker.LightPalette
 import dev.boksremote.speaker.PaletteCodec
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 /** Stand-in colours for the "Lightboks default" card: the light picks its own, so show a neutral spectrum. */
@@ -159,33 +177,49 @@ private fun PaletteCard(
     }
 }
 
-/** Outlined tile that opens the editor on a new palette. */
+/**
+ * The dock's toolbar for the palette on the light: its colours lead, so it is plain which palette
+ * the buttons act on, then the actions as icons, each named in a tooltip on long-press.
+ */
 @Composable
-private fun AddPaletteCard(onClick: () -> Unit) {
-    Column(
-        Modifier
-            .clip(RoundedCornerShape(16.dp))
-            .border(2.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(16.dp))
-            .clickable(onClick = onClick)
-            .padding(6.dp),
-    ) {
-        Box(Modifier.fillMaxWidth().aspectRatio(1.3f), contentAlignment = Alignment.Center) {
-            IconBadge(Icons.Default.Add, size = 44.dp)
+private fun QuickActions(palette: LightPalette, actions: @Composable RowScope.() -> Unit) {
+    Surface(shape = CircleShape, color = MaterialTheme.colorScheme.surfaceContainerHighest, shadowElevation = 6.dp) {
+        Row(Modifier.height(56.dp).padding(start = 12.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            PaletteArt(palette.colors, Modifier.size(28.dp).clip(CircleShape))
+            Spacer(Modifier.width(4.dp))
+            actions()
         }
-        Text("New palette", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(start = 4.dp, end = 4.dp, top = 8.dp, bottom = 4.dp))
     }
 }
 
-private enum class PaletteTab(val label: String) { PRESETS("Presets"), YOURS("Your palettes") }
-
-/**
- * Full palette browser. Tapping a card applies it straight away and keeps the sheet open, so the
- * user can audition palettes on the light. Long-press a preset to copy it into the editor, or one
- * of their own to edit, duplicate, rename or delete it.
- */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun PalettePickerSheet(
+private fun QuickAction(icon: ImageVector, label: String, onClick: () -> Unit) {
+    TooltipBox(
+        positionProvider = TooltipDefaults.rememberPlainTooltipPositionProvider(),
+        tooltip = { PlainTooltip { Text(label) } },
+        state = rememberTooltipState(),
+    ) {
+        IconButton(onClick = onClick) { Icon(icon, contentDescription = label) }
+    }
+}
+
+/** Names a group of palettes on the [PalettesPage]. */
+@Composable
+private fun GroupHeading(text: String, modifier: Modifier = Modifier) {
+    Text(text, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = modifier.padding(start = 4.dp))
+}
+
+/**
+ * Every palette on a page of its own: the user's first, then the presets, one list rather than tabs
+ * so both are a scroll away. Tapping a card applies it straight away and keeps the page open, so the
+ * user can audition palettes on the light. A dock at the bottom, under the thumb, holds New palette
+ * and quick actions for the palette on the light: edit, duplicate, rename and delete for one of the
+ * user's, a copy to edit for a preset. Long-press any card to reach the same actions without
+ * applying it first.
+ */
+@Composable
+fun PalettesPage(
     active: LightPalette?,
     activeIsDefault: Boolean,
     saved: List<LightPalette>,
@@ -199,10 +233,9 @@ fun PalettePickerSheet(
     onDelete: (LightPalette) -> (() -> Unit),
     onDismiss: () -> Unit,
 ) {
-    var tab by rememberSaveable { mutableIntStateOf(0) }
     var menuFor by remember { mutableStateOf<LightPalette?>(null) }
     var renaming by remember { mutableStateOf<LightPalette?>(null) }
-    // The sheet is its own window above the screen's snackbar, so it has one of its own.
+    // The page is its own window above the screen's snackbar, so it has one of its own.
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     fun delete(p: LightPalette) {
@@ -213,100 +246,132 @@ fun PalettePickerSheet(
             if (result == SnackbarResult.ActionPerformed) undo()
         }
     }
-    val currentTab = PaletteTab.entries[tab]
     fun isActive(p: LightPalette) = !activeIsDefault && active?.name == p.name
+    val activeOwn = saved.find(::isActive)
+    val activePreset = LightPalette.PRESETS.find(::isActive)
 
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), modifier = Modifier.sheetTopMargin()) {
-        Text("Colour palettes", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(start = 24.dp, end = 24.dp, bottom = 8.dp))
-        PrimaryTabRow(selectedTabIndex = tab) {
-            PaletteTab.entries.forEachIndexed { i, t ->
-                Tab(
-                    selected = tab == i,
-                    onClick = { tab = i },
-                    text = { Text(if (t == PaletteTab.YOURS && saved.isNotEmpty()) "${t.label} (${saved.size})" else t.label) },
-                )
-            }
-        }
-        Box {
+    FullScreenPage(
+        onDismiss = onDismiss,
+        fromSide = true,
+        top = {
+            IconButton(onClick = onDismiss) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
+            Text("Colour palettes", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(start = 4.dp))
+        },
+    ) {
+        Box(Modifier.weight(1f).navigationBarsPadding()) {
             LazyVerticalGrid(
                 columns = GridCells.Adaptive(minSize = 104.dp),
-                contentPadding = PaddingValues(16.dp),
+                // Room at the end for the button, so it never covers the last row.
+                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 104.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
-                modifier = Modifier.fillMaxWidth().navigationBarsPadding(),
+                modifier = Modifier.fillMaxSize(),
             ) {
-                when (currentTab) {
-                    PaletteTab.PRESETS -> {
-                        item(key = "default") {
-                            PaletteCard(
-                                name = "Lightboks default",
-                                colors = DEFAULT_ART,
-                                selected = activeIsDefault,
-                                onClick = onResetDefault,
-                                badge = {
-                                    Surface(shape = RoundedCornerShape(8.dp), color = Color.Black.copy(alpha = 0.7f)) {
-                                        Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = Color.White, modifier = Modifier.padding(5.dp).size(16.dp))
-                                    }
-                                },
+                item(key = "yours", span = { GridItemSpan(maxLineSpan) }) { GroupHeading("Your palettes") }
+                if (saved.isEmpty()) {
+                    item(key = "empty", span = { GridItemSpan(maxLineSpan) }) {
+                        HintText("Tap New palette to make one, or long-press a preset to start from a copy.")
+                    }
+                }
+                items(saved, key = { "saved:" + it.name }) { p ->
+                    Box {
+                        PaletteCard(p.name, p.colors, isActive(p), onClick = { onApply(p) }, onLongClick = { menuFor = p }, onLongClickLabel = "Edit, duplicate, rename or delete")
+                        DropdownMenu(expanded = menuFor == p, onDismissRequest = { menuFor = null }) {
+                            DropdownMenuItem(
+                                text = { Text("Edit") },
+                                leadingIcon = { Icon(Icons.Default.Palette, contentDescription = null) },
+                                onClick = { onEdit(p); menuFor = null },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Duplicate") },
+                                leadingIcon = { Icon(Icons.Default.ContentCopy, contentDescription = null) },
+                                onClick = { onDuplicate(p); menuFor = null },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Rename") },
+                                leadingIcon = { Icon(Icons.Default.DriveFileRenameOutline, contentDescription = null) },
+                                onClick = { renaming = p; menuFor = null },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Delete") },
+                                leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null) },
+                                onClick = { delete(p); menuFor = null },
                             )
                         }
-                        items(LightPalette.PRESETS, key = { "preset:" + it.name }) { p ->
-                            Box {
-                                PaletteCard(p.name, p.colors, isActive(p), onClick = { onApply(p) }, onLongClick = { menuFor = p }, onLongClickLabel = "Duplicate and edit")
-                                DropdownMenu(expanded = menuFor == p, onDismissRequest = { menuFor = null }) {
-                                    DropdownMenuItem(
-                                        text = { Text("Duplicate & edit") },
-                                        leadingIcon = { Icon(Icons.Default.ContentCopy, contentDescription = null) },
-                                        onClick = { onDuplicate(p); menuFor = null },
-                                    )
-                                }
-                            }
-                        }
                     }
-                    PaletteTab.YOURS -> {
-                        item(key = "add") { AddPaletteCard(onClick = onNew) }
-                        items(saved, key = { "saved:" + it.name }) { p ->
-                            Box {
-                                PaletteCard(p.name, p.colors, isActive(p), onClick = { onApply(p) }, onLongClick = { menuFor = p }, onLongClickLabel = "Edit, duplicate, rename or delete")
-                                DropdownMenu(expanded = menuFor == p, onDismissRequest = { menuFor = null }) {
-                                    DropdownMenuItem(
-                                        text = { Text("Edit") },
-                                        leadingIcon = { Icon(Icons.Default.Palette, contentDescription = null) },
-                                        onClick = { onEdit(p); menuFor = null },
-                                    )
-                                    DropdownMenuItem(
-                                        text = { Text("Duplicate") },
-                                        leadingIcon = { Icon(Icons.Default.ContentCopy, contentDescription = null) },
-                                        onClick = { onDuplicate(p); menuFor = null },
-                                    )
-                                    DropdownMenuItem(
-                                        text = { Text("Rename") },
-                                        leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
-                                        onClick = { renaming = p; menuFor = null },
-                                    )
-                                    DropdownMenuItem(
-                                        text = { Text("Delete") },
-                                        leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null) },
-                                        onClick = { delete(p); menuFor = null },
-                                    )
-                                }
+                }
+                item(key = "presets", span = { GridItemSpan(maxLineSpan) }) { GroupHeading("Presets", Modifier.padding(top = 12.dp)) }
+                item(key = "default") {
+                    PaletteCard(
+                        name = "Lightboks default",
+                        colors = DEFAULT_ART,
+                        selected = activeIsDefault,
+                        onClick = onResetDefault,
+                        badge = {
+                            Surface(shape = RoundedCornerShape(8.dp), color = Color.Black.copy(alpha = 0.7f)) {
+                                Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = Color.White, modifier = Modifier.padding(5.dp).size(16.dp))
                             }
-                        }
-                        if (saved.isEmpty()) {
-                            item(span = { GridItemSpan(maxLineSpan) }) {
-                                HintText("Tap New palette to make one, or long-press a preset to start from a copy. Long-press your palettes to edit them.")
-                            }
+                        },
+                    )
+                }
+                items(LightPalette.PRESETS, key = { "preset:" + it.name }) { p ->
+                    Box {
+                        PaletteCard(p.name, p.colors, isActive(p), onClick = { onApply(p) }, onLongClick = { menuFor = p }, onLongClickLabel = "Duplicate and edit")
+                        DropdownMenu(expanded = menuFor == p, onDismissRequest = { menuFor = null }) {
+                            DropdownMenuItem(
+                                text = { Text("Duplicate & edit") },
+                                leadingIcon = { Icon(Icons.Default.ContentCopy, contentDescription = null) },
+                                onClick = { onDuplicate(p); menuFor = null },
+                            )
                         }
                     }
                 }
             }
-            SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).navigationBarsPadding())
+            // Cards fade out under the dock instead of being cut by it.
+            Box(
+                Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(136.dp)
+                    .background(Brush.verticalGradient(0f to Color.Transparent, 0.55f to MaterialTheme.colorScheme.surface, 1f to MaterialTheme.colorScheme.surface)),
+            )
+            Row(
+                Modifier.align(Alignment.BottomEnd).fillMaxWidth().padding(16.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.End),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                val onLight = activeOwn ?: activePreset
+                if (onLight != null) {
+                    QuickActions(onLight) {
+                        if (activeOwn != null) {
+                            QuickAction(Icons.Default.Palette, "Edit colours") { onEdit(activeOwn) }
+                            QuickAction(Icons.Default.ContentCopy, "Duplicate") { onDuplicate(activeOwn) }
+                            QuickAction(Icons.Default.DriveFileRenameOutline, "Rename") { renaming = activeOwn }
+                            Box(Modifier.padding(horizontal = 4.dp).width(1.dp).height(24.dp).background(MaterialTheme.colorScheme.outlineVariant))
+                            QuickAction(Icons.Default.Delete, "Delete") { delete(activeOwn) }
+                        } else {
+                            TextButton(onClick = { onDuplicate(onLight) }) { Text("Duplicate & edit") }
+                        }
+                    }
+                    // Shaped and coloured like the toolbar beside it, so the two read as one dock; New palette alone matches too.
+                    FloatingActionButton(
+                        onClick = onNew,
+                        shape = CircleShape,
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                    ) { Icon(Icons.Default.Add, contentDescription = "New palette") }
+                } else {
+                    ExtendedFloatingActionButton(
+                        onClick = onNew,
+                        icon = { Icon(Icons.Default.Add, contentDescription = null) },
+                        text = { Text("New palette") },
+                        shape = CircleShape,
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                    )
+                }
+            }
+            SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).padding(bottom = 88.dp))
         }
-        Spacer(Modifier.height(8.dp))
-    }
 
-    renaming?.let { p ->
-        PaletteNameDialog("Rename palette", p.name, "Rename", onDismiss = { renaming = null }) { onRename(p, it); renaming = null }
+        renaming?.let { p ->
+            PaletteNameDialog("Rename palette", p.name, "Rename", onDismiss = { renaming = null }) { onRename(p, it); renaming = null }
+        }
     }
 }
 
@@ -319,20 +384,35 @@ internal fun PaletteNameDialog(
     onDismiss: () -> Unit,
     onConfirm: (String) -> Unit,
 ) {
-    var name by remember { mutableStateOf(initial) }
+    // Starts selected, so typing replaces the old name and a tap in the field keeps it.
+    var name by remember { mutableStateOf(TextFieldValue(initial, TextRange(0, initial.length))) }
+    val focus = remember { FocusRequester() }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(title) },
         text = {
+            // Focus alone leaves the keyboard closed in a dialog, above all one opened over a full-screen
+            // page, so its window is told to show it once the window has focus.
+            val view = LocalView.current
+            val windowInfo = LocalWindowInfo.current
+            LaunchedEffect(Unit) {
+                snapshotFlow { windowInfo.isWindowFocused }.first { it }
+                focus.requestFocus()
+                val window = (view.parent as? DialogWindowProvider)?.window
+                    ?: (view.parent?.parent as? DialogWindowProvider)?.window
+                window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE)
+                window?.let { WindowCompat.getInsetsController(it, view).show(WindowInsetsCompat.Type.ime()) }
+            }
             OutlinedTextField(
                 value = name,
-                onValueChange = { name = it.take(PaletteCodec.MAX_NAME) },
+                onValueChange = { name = it.copy(text = it.text.take(PaletteCodec.MAX_NAME)) },
                 label = { Text("Name") },
                 placeholder = { Text(placeholder) },
                 singleLine = true,
+                modifier = Modifier.focusRequester(focus),
             )
         },
-        confirmButton = { TextButton(onClick = { onConfirm(name.trim()) }) { Text(confirm) } },
+        confirmButton = { TextButton(onClick = { onConfirm(name.text.trim()) }) { Text(confirm) } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }

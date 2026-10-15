@@ -28,7 +28,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BookmarkAdd
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material3.ButtonDefaults
@@ -40,7 +39,8 @@ import dev.boksremote.speaker.PaletteLibrary
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -64,6 +64,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import kotlin.math.abs
 import dev.boksremote.speaker.HsvColor
 import dev.boksremote.speaker.LightFx
 import dev.boksremote.speaker.LightPalette
@@ -93,27 +94,34 @@ fun PaletteSection(s: SpeakerState, speaker: SpeakerController, store: PaletteLi
         Modifier
             .fillMaxWidth()
             .clickable(onClickLabel = "Browse palettes") { browsing = true }
-            .padding(start = 16.dp, end = 8.dp, top = 10.dp, bottom = 6.dp),
+            .padding(start = 16.dp, end = 12.dp, top = 18.dp, bottom = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
             Text(current?.name ?: "Lightboks default", style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(kind.label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
+        // The one action on the row, so it is the one thing on it that looks like a button.
         if (unsaved) {
-            TextButton(onClick = { editCurrent(0) }) {
+            FilledTonalButton(onClick = { editCurrent(0) }, contentPadding = ButtonDefaults.ButtonWithIconContentPadding) {
                 Icon(Icons.Default.BookmarkAdd, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
                 Spacer(Modifier.width(ButtonDefaults.IconSpacing))
                 Text("Save")
             }
         }
-        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        // The whole row opens the palettes; the chevron only says so.
+        Icon(
+            Icons.AutoMirrored.Filled.KeyboardArrowRight,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 4.dp),
+        )
     }
-    SwatchStrip(shown, ::editCurrent, Modifier.padding(start = 16.dp, end = 16.dp, top = 2.dp, bottom = 12.dp))
+    SwatchStrip(shown, ::editCurrent, Modifier.padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 18.dp))
     if (current == null) HintText("Tap a colour to make your own palette.", Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp))
 
     if (browsing) {
-        PalettePickerSheet(
+        PalettesPage(
             active = s.palette,
             activeIsDefault = s.paletteIsDefault,
             saved = saved,
@@ -133,7 +141,7 @@ fun PaletteSection(s: SpeakerState, speaker: SpeakerController, store: PaletteLi
     }
     draft?.let { d ->
         val session = remember(d) { cycle.preview(speaker) }
-        PaletteEditorSheet(
+        PaletteEditorPage(
             draft = d,
             onLight = current?.colors,
             recentColors = recent,
@@ -230,6 +238,8 @@ fun FxPad(speaker: SpeakerController) {
 }
 
 private val LOCK_DRAG = 56.dp
+/** How long a pad waits to tell a press from a swipe that scrolls the screen. */
+private const val PRESS_WAIT_MS = 50L
 
 /** Swallows the rest of a gesture, so the screen behind doesn't scroll with it. */
 private suspend fun AwaitPointerEventScope.consumeUntilUp() {
@@ -274,18 +284,42 @@ private fun HoldPad(
                 val lockPx = LOCK_DRAG.toPx()
                 awaitEachGesture {
                     val down = awaitFirstDown()
-                    down.consume()
                     if (isLocked) {
+                        down.consume()
                         haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                         unlock()
                         consumeUntilUp()
                         return@awaitEachGesture
                     }
+                    // A swipe that starts on a pad is the screen scrolling, not a press: the pad waits a moment
+                    // for the finger, and lets the screen have it if it heads down or sideways first. Moving up
+                    // is the slide to lock, so it presses at once.
+                    var released = false
+                    val press = withTimeoutOrNull(PRESS_WAIT_MS) {
+                        var decided: Boolean? = null
+                        while (decided == null) {
+                            val change = awaitPointerEvent().changes.firstOrNull { it.id == down.id }
+                            when {
+                                change == null -> decided = false
+                                // A quick tap still plays, if only for a moment.
+                                !change.pressed -> { released = true; decided = true }
+                                else -> {
+                                    val moved = change.position - down.position
+                                    if (moved.getDistance() > viewConfiguration.touchSlop) {
+                                        decided = moved.y < 0 && abs(moved.y) > abs(moved.x)
+                                        if (decided) change.consume()
+                                    }
+                                }
+                            }
+                        }
+                        decided
+                    } ?: true
+                    if (!press) return@awaitEachGesture
                     active = true
                     haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                     hold(true)
                     var lockedNow = false
-                    while (true) {
+                    while (!released) {
                         val change = awaitPointerEvent().changes.firstOrNull { it.id == down.id } ?: break
                         if (!change.pressed) break
                         // Taken here, so a slide doesn't scroll the screen and cut the hold short.
@@ -350,7 +384,7 @@ fun LightModePicker(selected: EnergyLevel?, onSelect: (EnergyLevel) -> Unit) {
         EnergyLevel.entries.forEach { level ->
             val on = level == selected
             val container by animateColorAsState(
-                if (on) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
+                if (on) MaterialTheme.colorScheme.primaryContainer else tileContainer,
                 label = "mode container",
             )
             val content by animateColorAsState(

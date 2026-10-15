@@ -1,6 +1,18 @@
 package dev.boksremote.ui
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.MutableTransitionState
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideInVertically
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
+import androidx.compose.material3.Surface
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.indication
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -34,6 +46,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -74,7 +87,7 @@ internal fun SectionCard(
 ) {
     Card(
         modifier = modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+        colors = CardDefaults.cardColors(containerColor = cardContainer),
     ) {
         Column(Modifier.animateContentSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             // The whole header toggles, but only the chevron shows the press.
@@ -105,10 +118,50 @@ internal fun SectionCard(
 }
 
 /**
+ * The cards on the device list and device screens, a clear step above the page. In the dark theme the
+ * page (see AppTheme), a card and the [tileContainer]s on it climb in even steps of the same tinted grey.
+ */
+internal val cardContainer: Color
+    @Composable get() = MaterialTheme.colorScheme.run { if (surface.luminance() < 0.5f) surfaceContainerHigh else surfaceContainer }
+
+/** A tile or track on a card, the next step above [cardContainer]. */
+internal val tileContainer: Color
+    @Composable get() = MaterialTheme.colorScheme.run { if (surface.luminance() < 0.5f) surfaceBright else surfaceContainerHighest }
+
+/**
  * For a [androidx.compose.material3.ModalBottomSheet]: a tall sheet otherwise expands up under the
  * status bar, so this keeps it below it with a gap that shows the screen behind.
  */
 internal fun Modifier.sheetTopMargin() = statusBarsPadding().padding(top = 16.dp)
+
+/**
+ * A page of its own over the device screen, which stays as it was underneath: a full-screen window
+ * with [top] as its top bar. [fromSide] slides it in from the right, like a page navigated to;
+ * otherwise it rises a little, like an editor opened on the spot.
+ */
+@Composable
+internal fun FullScreenPage(
+    onDismiss: () -> Unit,
+    fromSide: Boolean = false,
+    top: @Composable RowScope.() -> Unit,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false, dismissOnClickOutside = false),
+    ) {
+        val shown = remember { MutableTransitionState(false).apply { targetState = true } }
+        val enter = if (fromSide) slideInHorizontally { it / 8 } + fadeIn() else slideInVertically { it / 12 } + fadeIn()
+        AnimatedVisibility(shown, enter = enter) {
+            Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
+                Column(Modifier.fillMaxSize().statusBarsPadding()) {
+                    Row(Modifier.fillMaxWidth().height(64.dp).padding(start = 4.dp, end = 16.dp), verticalAlignment = Alignment.CenterVertically, content = top)
+                    content()
+                }
+            }
+        }
+    }
+}
 
 /** A small label above a control inside a [SectionCard]. */
 @Composable

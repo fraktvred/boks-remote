@@ -1,5 +1,6 @@
 package dev.boksremote.speaker
 
+import dev.boksremote.protocol.Family
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
@@ -69,6 +70,8 @@ class SceneSession(
      */
     private var applying: Applying? = null
     private var retry: Job? = null
+    /** True from connecting until the light has reported its state, while there has never been a scene; see [SceneStore.seeded]. */
+    private var seedPending = false
 
     /** [cycling]: Cycle shows its own palette, so the scene's isn't waited for. */
     private class Applying(val scene: Scene, val cycling: Boolean)
@@ -93,7 +96,13 @@ class SceneSession(
         scope.launch {
             lightState.collect { s ->
                 if (s != null) applying?.let { if (s.shows(it)) applying = null }
-                if (!restorePending || s?.connection != ConnectionState.CONNECTED || s.brightness == null || s.energyLevel == null) return@collect
+                if (s?.connection != ConnectionState.CONNECTED || s.brightness == null || s.energyLevel == null) return@collect
+                // The first Lightboks connected starts out with a scene in use, made from how it is.
+                if (seedPending && s.family == Family.LIGHT && s.rpcAvailable) {
+                    seedPending = false
+                    if (!scenes.seeded) save(FIRST_SCENE)
+                }
+                if (!restorePending) return@collect
                 restorePending = false
                 activeScene()?.let(::apply)
             }
@@ -103,6 +112,7 @@ class SceneSession(
     /** A light is being connected; the scene in use goes back on it once it has reported its state. */
     fun connecting() {
         restorePending = _active.value != null
+        seedPending = !scenes.seeded
     }
 
     /** The light is being left: the scene in use keeps it as it was, and stays in use for the next connection. */
@@ -239,5 +249,7 @@ class SceneSession(
         const val SYNC_MS = 2_000L
         /** After a scene is applied, its own writes land within this; they are not user changes. */
         const val SETTLE_MS = 3_000L
+        /** The scene made on first connecting a Lightboks. */
+        const val FIRST_SCENE = "Default Scene"
     }
 }

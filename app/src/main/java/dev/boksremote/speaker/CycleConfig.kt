@@ -58,6 +58,11 @@ class CycleConfigStore(private val kv: KeyValue) {
         kv[KEY] = CycleConfigCodec.encode(config)
     }
 
+    /** Whether the Cycle card shows its palettes as large previews; how it looks, so not part of [CycleConfig] or a scene. */
+    var largePreviews: Boolean
+        get() = kv[LARGE_PREVIEWS].toBoolean()
+        set(value) { kv[LARGE_PREVIEWS] = value.toString() }
+
     /** Before one key held them all, each setting had its own; names were split by newlines. */
     private fun legacy(): CycleConfig? {
         val names = kv[OLD_NAMES] ?: return null
@@ -68,6 +73,7 @@ class CycleConfigStore(private val kv: KeyValue) {
 
     private companion object {
         const val KEY = "config"
+        const val LARGE_PREVIEWS = "large_previews"
         const val OLD_NAMES = "names"
         const val OLD_INTERVAL = "interval"
         const val OLD_SHUFFLE = "shuffle"
