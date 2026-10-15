@@ -214,9 +214,14 @@ class SpeakerController private constructor(
         jobs += scope.launch { ble.notifications.collect { onNotify(it.characteristic, it.value) } }
 
         setUpRpc(family)
+        // Unlock before anything else, as the official app does: a pincode-protected speaker may refuse or drop
+        // other reads and calls until then. Still locked, the state loads once the pincode is entered.
+        if (checkSecurity(family)) loadState(family)
+    }
+
+    private suspend fun loadState(family: Family) {
         readInitialState(family)
         subscribe(family)
-        checkSecurity(family)
     }
 
     private fun detectFamily(): Family = when {
@@ -340,23 +345,25 @@ class SpeakerController private constructor(
 
     // --- security ----------------------------------------------------------------------------
 
-    private suspend fun checkSecurity(family: Family) {
+    /** True when the device is usable now: it has no pincode, or the saved one unlocked it. */
+    private suspend fun checkSecurity(family: Family): Boolean {
         val flagsChar = if (family == Family.LEGACY) Uuids.LEGACY_SECURITY_LEVEL else Uuids.SYSTEM_STATE
-        val flags = readByte(flagsChar)?.let(SecurityFlags::from) ?: advert?.security ?: return
+        val flags = readByte(flagsChar)?.let(SecurityFlags::from) ?: advert?.security ?: return true
         _state.update { it.copy(locked = flags.locked) }
-        if (!flags.pincodeEnabled) return
+        if (!flags.pincodeEnabled) return true
         val saved = pincodes.get(address)
-        if (saved != null && authenticate(saved)) return
+        if (saved != null && authenticate(saved)) return true
         _state.update { it.copy(pincodeRequired = true) }
+        return false
     }
 
     fun submitPincode(pin: String) = scope.launch {
         if (authenticate(pin)) {
             pincodes.put(address, pin)
             _state.update { it.copy(pincodeRequired = false, message = "Unlocked") }
-            readInitialState(family ?: return@launch)
+            loadState(family ?: return@launch)
         } else {
-            // Keep a more specific reason (lockout, unsupported firmware) that authenticate() already set.
+            // Keep a more specific reason (lockout, unsupported firmware, no answer) that authenticate() already set.
             _state.update { it.copy(message = it.message ?: "Wrong pincode") }
         }
     }
@@ -380,7 +387,9 @@ class SpeakerController private constructor(
             }
             ok
         } catch (e: Exception) {
+            // The speaker never judged the pincode, so it is not "wrong" and the saved one is kept.
             Log.w(TAG, "authenticate failed", e)
+            _state.update { it.copy(message = "${if (family == Family.LIGHT) "The Lightboks" else "The speaker"} didn't answer (${e.message ?: "no reply"}); try again") }
             false
         }
     }
@@ -538,7 +547,16 @@ class SpeakerController private constructor(
         attemptQuietly { rpc.call("SystemService", "PowerOff", proto { int32(1, 1) }, timeoutMs = 3_000) }
     }
 
+    /**
+     * SystemService.PowerOff{type: POWEROFF} on RPC devices, as the official app does; they ignore a
+     * write to SYSTEM_POWER. Like a restart, the link drops before the answer, so that means it worked.
+     */
     override fun powerOff() {
+        val rpc = rpc
+        if (rpc != null && !demo) {
+            scope.launch { attemptQuietly { rpc.call("SystemService", "PowerOff", proto { int32(1, 0) }, timeoutMs = 3_000) } }
+            return
+        }
         control("power off") {
             if (family == Family.LEGACY) write(Uuids.LEGACY_POWER_MODE, byteArrayOf(0))
             else write(Uuids.SYSTEM_POWER, byteArrayOf(0, 0)) // [OFF, no reboot]
