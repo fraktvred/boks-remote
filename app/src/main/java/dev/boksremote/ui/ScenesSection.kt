@@ -71,7 +71,7 @@ import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.graphics.graphicsLayer
-import dev.boksremote.BoksApp
+import dev.boksremote.DevicePanel
 import dev.boksremote.speaker.CycleStatus
 import dev.boksremote.speaker.Scene
 import dev.boksremote.speaker.SpeakerState
@@ -150,18 +150,19 @@ private fun ReorderableScenes(scenes: List<Scene>, onMove: (from: Int, to: Int) 
  * light's colours are part of the scene in use. Keeps the device screen short however many scenes there are.
  */
 @Composable
-fun ScenesSection(s: SpeakerState, app: BoksApp, colours: @Composable () -> Unit) {
-    val scenes by app.scenes.scenes.collectAsState()
-    val activeName by app.session.active.collectAsState()
-    val live by app.session.live.collectAsState()
-    val cycle by app.cycle.status.collectAsState()
+fun ScenesSection(s: SpeakerState, panel: DevicePanel, colours: @Composable () -> Unit) {
+    val scenes by panel.workspace.scenes.scenes.collectAsState()
+    val stage = panel.stage
+    val activeName by stage.scenes.active.collectAsState()
+    val live by stage.scenes.live.collectAsState()
+    val cycle by stage.cycle.status.collectAsState()
     var browsing by remember { mutableStateOf(false) }
     var naming by remember { mutableStateOf(false) }
     var renaming by remember { mutableStateOf<Scene?>(null) }
     val canSave = s.brightness != null && s.energyLevel != null
     // The scene in use follows Cycle, so its Cycle is the one running.
     fun playing(scene: Scene) = (cycle as? CycleStatus.Running)?.takeIf { scene.name == activeName }
-    fun position(scene: Scene) = if (playing(scene) != null) app.cycle.position() else 0
+    fun position(scene: Scene) = if (playing(scene) != null) stage.cycle.position() else 0
     val active = scenes.firstOrNull { it.name == activeName }
     // The light as it is now, rather than as last saved, so a change or a Cycle step shows at once.
     val shown = active?.let { live?.takeIf { it.name == active.name } ?: active }
@@ -199,23 +200,23 @@ fun ScenesSection(s: SpeakerState, app: BoksApp, colours: @Composable () -> Unit
             playing = ::playing,
             position = ::position,
             canSave = canSave,
-            onApply = { app.session.apply(it); browsing = false },
+            onApply = { stage.applyScene(it); browsing = false },
             onRename = { renaming = it },
-            onDelete = app.session::delete,
-            onMove = app.scenes::move,
+            onDelete = stage.scenes::delete,
+            onMove = panel.workspace.scenes::move,
             onSaveNew = { naming = true },
             onDismiss = { browsing = false },
         )
     }
     if (naming) {
-        PaletteNameDialog(if (active == null) "Save as scene" else "New scene", app.scenes.suggestName(), "Save", placeholder = "Scene", onDismiss = { naming = false }) { name ->
-            app.session.save(name)
+        PaletteNameDialog(if (active == null) "Save as scene" else "New scene", panel.workspace.scenes.suggestName(), "Save", placeholder = "Scene", onDismiss = { naming = false }) { name ->
+            stage.scenes.save(name)
             naming = false
         }
     }
     renaming?.let { scene ->
         PaletteNameDialog("Rename scene", scene.name, "Rename", placeholder = "Scene", onDismiss = { renaming = null }) { name ->
-            app.session.rename(scene, name)
+            stage.scenes.rename(scene, name)
             renaming = null
         }
     }
@@ -333,7 +334,7 @@ private fun sceneStatus(scene: Scene, playing: CycleStatus.Running?, position: I
 
 /** Time to Cycle's next palette, beside its icon. */
 @Composable
-private fun Countdown(nextAt: Long, tint: Color = MaterialTheme.colorScheme.primary) {
+internal fun Countdown(nextAt: Long, tint: Color = MaterialTheme.colorScheme.primary) {
     val left by produceState(0L, nextAt) {
         while (true) {
             value = (nextAt - SystemClock.elapsedRealtime()).coerceAtLeast(0) / 1000

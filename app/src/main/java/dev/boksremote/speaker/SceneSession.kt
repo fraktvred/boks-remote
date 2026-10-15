@@ -1,6 +1,5 @@
 package dev.boksremote.speaker
 
-import dev.boksremote.protocol.Family
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
@@ -34,10 +33,10 @@ class SceneSession(
     private val cycle: PaletteCycle,
     private val sleep: SleepFade,
     private val clock: Clock = Clock.ELAPSED,
-) {
+) : SceneView {
     private val _active = MutableStateFlow(scenes.active)
     /** The scene in use, by name: applied or saved last. Kept across restarts. */
-    val active: StateFlow<String?> = _active
+    override val active: StateFlow<String?> = _active
 
     private val lightState = light.flatMapLatest { it?.state ?: flowOf(null) }
 
@@ -47,7 +46,7 @@ class SceneSession(
      * Null while the light isn't the user's to read (see [syncable]) and while an applied scene's own
      * writes are still landing; the saved scene stands in then.
      */
-    val live: StateFlow<Scene?> = combine(
+    override val live: StateFlow<Scene?> = combine(
         combine(lightState, cycle.config, cycle.status) { _, _, _ -> },
         combine(cycle.lent, sleep.status.map { it.running }) { _, _ -> },
         scenes.scenes,
@@ -98,7 +97,7 @@ class SceneSession(
                 if (s != null) applying?.let { if (s.shows(it)) applying = null }
                 if (s?.connection != ConnectionState.CONNECTED || s.brightness == null || s.energyLevel == null) return@collect
                 // The first Lightboks connected starts out with a scene in use, made from how it is.
-                if (seedPending && s.family == Family.LIGHT && s.rpcAvailable) {
+                if (seedPending && Feature.LIGHT_CONTENT in s.features) {
                     seedPending = false
                     if (!scenes.seeded) save(FIRST_SCENE)
                 }
@@ -141,17 +140,17 @@ class SceneSession(
     }
 
     /** Saves what the light shows as a new scene, which becomes the active one. */
-    fun save(name: String) {
+    override fun save(name: String) {
         val scene = capture(name) ?: return
         setActive(scenes.add(scene).name)
     }
 
-    fun rename(scene: Scene, name: String) {
+    override fun rename(scene: Scene, name: String) {
         val renamed = scenes.replace(scene, scene.copy(name = name))
         if (_active.value == scene.name) setActive(renamed.name)
     }
 
-    fun delete(scene: Scene) {
+    override fun delete(scene: Scene) {
         scenes.delete(scene)
         if (_active.value == scene.name) setActive(null)
     }

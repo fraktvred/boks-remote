@@ -3,10 +3,7 @@ package dev.boksremote.dmx
 import android.content.Context
 import android.net.wifi.WifiManager
 import android.util.Log
-import dev.boksremote.speaker.ConnectionState
-import dev.boksremote.speaker.EnergyLevel
-import dev.boksremote.speaker.LightContentCodec
-import dev.boksremote.speaker.SpeakerController
+import dev.boksremote.speaker.Stage
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -16,12 +13,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withTimeoutOrNull
 import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.Inet4Address
@@ -30,7 +24,6 @@ import java.net.InetSocketAddress
 import java.net.MulticastSocket
 import java.net.NetworkInterface
 import java.net.SocketTimeoutException
-import java.util.UUID
 import java.util.concurrent.atomic.AtomicInteger
 
 enum class DmxProtocol(val label: String, val universes: IntRange) {
@@ -62,45 +55,34 @@ data class DmxStatus(
 )
 
 /**
- * Receives one DMX universe over the LAN and drives a Lightboks over Bluetooth.
- *
- * DMX arrives at up to 44 Hz but each Bluetooth write takes several milliseconds, so the bridge
- * keeps only the latest look and sends whatever differs from what the light last got.
- *
- * The Lightboks keeps its active palette across a reboot (tested 2026-10-12: a palette sent by the
- * bridge was still active after SystemService.PowerOff{REBOOT}), so each palette write may cost a
- * flash write. Colours are therefore only sent once they have held for [COLOR_SETTLE_MS], and at
- * most every [PALETTE_MIN_INTERVAL_MS]: a fade sends its end colour, not every step, while snaps
- * and chase steps still go through.
- *
- * While running, the bridge also keeps the Bluetooth link up: a dropped light is reconnected with
- * backoff, and then gets the full current look again.
+ * Receives one DMX universe over the LAN and drives a Lightboks, lent by its [Stage.Lease], through a
+ * [LookSender]. It answers a desk's ArtPoll so the phone shows up in its node list.
  */
 class DmxBridge(private val context: Context, private val scope: CoroutineScope) {
     private val _status = MutableStateFlow(DmxStatus())
     val status: StateFlow<DmxStatus> = _status
 
-    private val desired = MutableStateFlow<LightLook?>(null)
     @Volatile private var config = DmxConfig()
     @Volatile private var lastFrame: DmxFrame? = null
-    @Volatile private var colorsChangedAt = 0L
     /** Changes whenever the socket must be re-opened: protocol, or the sACN multicast group. */
     private val binding = MutableStateFlow(Binding(DmxProtocol.ARTNET, null))
     private var session: Job? = null
-    @Volatile private var light: SpeakerController? = null
+    @Volatile private var lease: Stage.Lease? = null
+    @Volatile private var sender: LookSender? = null
     private val packetCount = AtomicInteger()
     private var multicastLock: WifiManager.MulticastLock? = null
     private var wifiLock: WifiManager.WifiLock? = null
 
     private data class Binding(val protocol: DmxProtocol, val sacnUniverse: Int?)
 
-    fun start(config: DmxConfig, light: SpeakerController) {
+    fun start(config: DmxConfig, lease: Stage.Lease) {
         stop()
-        this.light = light
+        val sender = LookSender(lease.output, lease.light.state)
+        this.lease = lease
+        this.sender = sender
         this.config = config
         binding.value = bindingFor(config)
         lastFrame = null
-        desired.value = null
         _status.value = DmxStatus(running = true, addresses = LocalNetwork.addresses().map { it.text })
         acquireWifiLocks()
         session = scope.launch {
@@ -113,7 +95,8 @@ class DmxBridge(private val context: Context, private val scope: CoroutineScope)
                     receiver = launch(Dispatchers.IO) { receive(b) }
                 }
             }
-            launch { send(light) }
+            launch { sender.run() }
+            launch { sender.sending.collect { s -> _status.update { it.copy(reconnecting = s.reconnecting, lightError = s.error) } } }
             launch { measureRate() }
         }
     }
@@ -129,10 +112,9 @@ class DmxBridge(private val context: Context, private val scope: CoroutineScope)
     fun stop() {
         session?.cancel()
         session = null
-        // Don't leave an effect running that the desk can no longer release.
-        val l = light
-        if (_status.value.look?.fx != null && l != null) scope.launch { runCatching { l.lightboks.applyFx(LightContentCodec.NO_ID) } }
-        light = null
+        // An effect left running is stopped as the lease ends.
+        lease = null
+        sender = null
         multicastLock?.takeIf { it.isHeld }?.release()
         wifiLock?.takeIf { it.isHeld }?.release()
         _status.update { it.copy(running = false, packetsPerSecond = 0, reconnecting = false) }
@@ -235,8 +217,7 @@ class DmxBridge(private val context: Context, private val scope: CoroutineScope)
     }
 
     private fun onLook(look: LightLook) {
-        if (look.colors != desired.value?.colors) colorsChangedAt = System.currentTimeMillis()
-        desired.value = look
+        sender?.want(look)
         if (_status.value.look != look) _status.update { it.copy(look = look) }
     }
 
@@ -245,7 +226,7 @@ class DmxBridge(private val context: Context, private val scope: CoroutineScope)
         val peer = from as? Inet4Address ?: return
         val local = LocalNetwork.facing(peer, LocalNetwork.addresses()) ?: return
         if (local.ip == peer) return // our own broadcast poll, if any
-        val lightName = light?.state?.value?.name ?: "Lightboks"
+        val lightName = lease?.light?.state?.value?.name ?: "Lightboks"
         val s = _status.value
         val report = when {
             s.reconnecting -> "Reconnecting to $lightName"
@@ -267,93 +248,6 @@ class DmxBridge(private val context: Context, private val scope: CoroutineScope)
         }
     }
 
-    // --- light side --------------------------------------------------------------------------
-
-    private suspend fun send(light: SpeakerController) {
-        // What the light last received, per output; null means unknown, so it is (re)sent.
-        var sentFx: Any? = UNKNOWN
-        var sentDimmer: Int? = null
-        var sentMode: EnergyLevel? = null
-        var sentColors: List<Rgb>? = null
-        var lastPaletteAt = 0L
-        var paletteSlot = false
-        while (currentCoroutineContext().isActive) {
-            val want = desired.value ?: desired.first { it != null }!!
-            if (light.state.value.connection != ConnectionState.CONNECTED) {
-                keepConnected(light)
-                sentFx = UNKNOWN; sentDimmer = null; sentMode = null; sentColors = null
-                continue
-            }
-            try {
-                when {
-                    want.fx != sentFx -> {
-                        light.lightboks.applyFx(want.fx?.id ?: LightContentCodec.NO_ID)
-                        sentFx = want.fx
-                    }
-                    want.dimmer != sentDimmer -> {
-                        light.lightboks.applyBrightness(want.dimmer)
-                        sentDimmer = want.dimmer
-                    }
-                    want.mode != sentMode -> {
-                        light.lightboks.applyEnergyLevel(want.mode)
-                        sentMode = want.mode
-                    }
-                    want.colors != sentColors -> {
-                        val now = System.currentTimeMillis()
-                        val wait = maxOf(lastPaletteAt + PALETTE_MIN_INTERVAL_MS, colorsChangedAt + COLOR_SETTLE_MS) - now
-                        if (wait > 0) {
-                            // Anything else that changes meanwhile is sent first.
-                            withTimeoutOrNull(wait) { awaitChange(light, want) }
-                            continue
-                        }
-                        // Alternating between two fixed ids changes the id on every update (so the light
-                        // never treats it as unchanged) without minting a new stored palette each time.
-                        paletteSlot = !paletteSlot
-                        light.lightboks.applyPalette(want.palette(), if (paletteSlot) PALETTE_ID_A else PALETTE_ID_B)
-                        lastPaletteAt = System.currentTimeMillis()
-                        sentColors = want.colors
-                    }
-                    else -> {
-                        awaitChange(light, want)
-                        continue
-                    }
-                }
-                if (_status.value.lightError != null) _status.update { it.copy(lightError = null) }
-            } catch (e: Exception) {
-                // Rethrows when the bridge stopped; a BLE/RPC timeout lands here as an ordinary failure.
-                currentCoroutineContext().ensureActive()
-                Log.w(TAG, "DMX send failed", e)
-                _status.update { it.copy(lightError = e.message ?: "write failed") }
-                delay(500)
-            }
-        }
-    }
-
-    /**
-     * Sleeps until the look changes or the light drops. Waiting on the look alone would miss a
-     * disconnect for as long as the desk keeps sending the same values, so no reconnect would start.
-     */
-    private suspend fun awaitChange(light: SpeakerController, want: LightLook) {
-        combine(desired, light.state) { d, s -> d != want || s.connection != ConnectionState.CONNECTED }.first { it }
-    }
-
-    /** Reconnects a dropped light, backing off between attempts, until it is back or the bridge stops. */
-    private suspend fun keepConnected(light: SpeakerController) {
-        _status.update { it.copy(reconnecting = true) }
-        var backoff = RECONNECT_MIN_MS
-        try {
-            while (light.state.value.connection != ConnectionState.CONNECTED) {
-                // A connect already in flight (the user tapped Reconnect) is awaited, not doubled.
-                val ok = if (light.state.value.connection == ConnectionState.CONNECTING) light.awaitConnection() else light.reconnect()
-                if (ok) break
-                delay(backoff)
-                backoff = (backoff * 2).coerceAtMost(RECONNECT_MAX_MS)
-            }
-        } finally {
-            _status.update { it.copy(reconnecting = false) }
-        }
-    }
-
     private suspend fun measureRate() {
         while (currentCoroutineContext().isActive) {
             delay(1000)
@@ -372,14 +266,7 @@ class DmxBridge(private val context: Context, private val scope: CoroutineScope)
 
     companion object {
         private const val TAG = "DmxBridge"
-        private val UNKNOWN = Any()
-        const val PALETTE_MIN_INTERVAL_MS = 250L
-        const val COLOR_SETTLE_MS = 150L
         private const val RECEIVE_TIMEOUT_MS = 250
         private const val INTERFACE_CHECK_MS = 3_000L
-        private const val RECONNECT_MIN_MS = 2_000L
-        private const val RECONNECT_MAX_MS = 15_000L
-        private val PALETTE_ID_A: UUID = UUID.fromString("b0c5d3a0-0d1e-4f7a-9c11-000000000d0a")
-        private val PALETTE_ID_B: UUID = UUID.fromString("b0c5d3a0-0d1e-4f7a-9c11-000000000d0b")
     }
 }

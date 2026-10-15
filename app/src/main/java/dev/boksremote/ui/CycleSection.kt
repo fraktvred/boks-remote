@@ -87,33 +87,34 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
-import dev.boksremote.BoksApp
+import dev.boksremote.DevicePanel
 import dev.boksremote.speaker.CycleConfig
 import dev.boksremote.speaker.CycleStatus
 import dev.boksremote.speaker.CycleTransition
 import dev.boksremote.speaker.LightPalette
-import dev.boksremote.speaker.SpeakerController
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 @Composable
-fun CycleSection(app: BoksApp, speaker: SpeakerController) {
-    val cycle = app.cycle
+fun CycleSection(panel: DevicePanel) {
+    val stage = panel.stage
+    val cycle = stage.cycle
     val status by cycle.status.collectAsState()
     val config by cycle.config.collectAsState()
-    val saved by app.palettes.palettes.collectAsState()
-    val lent by cycle.lent.collectAsState()
+    val saved by panel.workspace.palettes.palettes.collectAsState()
+    val stageStatus by stage.status.collectAsState()
+    val lent = stageStatus.leased
     val large by cycle.largePreviews.collectAsState()
     val palettes = remember(config, saved) { cycle.palettes() }
     var editing by remember { mutableStateOf(false) }
     // Ask once so the "cycling" notice is visible; start either way.
-    val notifications = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { cycle.start(speaker) }
-    val canStart = remember(palettes, lent) { cycle.canStart() }
+    val notifications = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { stage.startCycle() }
+    val canStart = stageStatus.cycle == null
 
     if (palettes.isNotEmpty()) {
         val current = status.current.takeIf { status.showing }
-        if (large) CycleGrid(palettes, current, paused = !status.running, enabled = !lent) { cycle.jumpTo(speaker, it.name) }
-        else CycleStrip(palettes, current, paused = !status.running, enabled = !lent) { cycle.jumpTo(speaker, it.name) }
+        if (large) CycleGrid(palettes, current, paused = !status.running, enabled = !lent) { stage.jumpTo(it.name) }
+        else CycleStrip(palettes, current, paused = !status.running, enabled = !lent) { stage.jumpTo(it.name) }
     }
     val every = CycleConfig.intervalLabel(config.intervalSeconds)
     val s = status
@@ -143,7 +144,7 @@ fun CycleSection(app: BoksApp, speaker: SpeakerController) {
     }
     Row(verticalAlignment = Alignment.CenterVertically) {
         if (status.running) {
-            FilledTonalButton(onClick = cycle::hold) {
+            FilledTonalButton(onClick = stage::holdCycle) {
                 Icon(Icons.Default.Pause, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
                 Spacer(Modifier.width(ButtonDefaults.IconSpacing))
                 Text("Pause")
@@ -158,10 +159,10 @@ fun CycleSection(app: BoksApp, speaker: SpeakerController) {
         // Stop starts the next run from the top; Pause keeps the place.
         if (status.running || status.paused) {
             Spacer(Modifier.width(4.dp))
-            IconButton(onClick = cycle::stop) { Icon(Icons.Default.Stop, contentDescription = "Stop, next start from the beginning") }
+            IconButton(onClick = stage::stopCycle) { Icon(Icons.Default.Stop, contentDescription = "Stop, next start from the beginning") }
         }
         if (status.running) {
-            IconButton(onClick = cycle::skip) { Icon(Icons.Default.SkipNext, contentDescription = "Next palette now") }
+            IconButton(onClick = stage::skipCycle) { Icon(Icons.Default.SkipNext, contentDescription = "Next palette now") }
         }
         Spacer(Modifier.weight(1f))
         TextButton(onClick = { editing = true }) {
@@ -177,7 +178,7 @@ fun CycleSection(app: BoksApp, speaker: SpeakerController) {
             largePreviews = large,
             onLargePreviews = cycle::setLargePreviews,
             inCycle = palettes,
-            available = app.palettes.all().filter { p -> palettes.none { it.name == p.name } },
+            available = panel.workspace.palettes.all().filter { p -> palettes.none { it.name == p.name } },
             savedNames = saved.map { it.name }.toSet(),
             onChange = cycle::update,
             onDismiss = { editing = false },

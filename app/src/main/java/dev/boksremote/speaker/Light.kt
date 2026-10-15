@@ -20,6 +20,8 @@ interface Light {
     fun setBrightness(value: Int)
     fun setEnergyLevel(level: EnergyLevel)
     fun powerOff()
+    /** Writes that finish once the light has them, for whoever paces their own: the DMX bridge. */
+    val output: LightOutput
 }
 
 /** [palette], or the light's default colours for null. */

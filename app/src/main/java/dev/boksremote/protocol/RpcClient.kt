@@ -1,6 +1,6 @@
 package dev.boksremote.protocol
 
-import dev.boksremote.ble.GattConnection
+import dev.boksremote.ble.Gatt
 import dev.boksremote.proto.ProtoMessage
 import dev.boksremote.proto.ProtoWriter
 import kotlinx.coroutines.CompletableDeferred
@@ -23,7 +23,7 @@ class RpcException(message: String, val status: Int = -1) : Exception(message)
  * one call at a time, so calls are serialized and matched to responses by call_id.
  */
 class RpcClient(
-    private val gatt: GattConnection,
+    private val gatt: Gatt,
     private val txCharacteristic: UUID,
     private val rxCharacteristic: UUID,
     scope: CoroutineScope,

@@ -72,7 +72,7 @@ private val THUMB_SIZE = 28.dp
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun PaletteSlider(value: Float, colors: List<Color>, onChange: (Float) -> Unit, onSettled: () -> Unit) {
+internal fun PaletteSlider(value: Float, colors: List<Color>, onChange: (Float) -> Unit, onSettled: () -> Unit, modifier: Modifier = Modifier) {
     val empty = tileContainer
     // A gradient needs two stops; a single colour is its own both ends.
     val stops = if (colors.size > 1) colors else List(2) { colors.firstOrNull() ?: Color.White }
@@ -80,7 +80,7 @@ private fun PaletteSlider(value: Float, colors: List<Color>, onChange: (Float) -
         value = value,
         onValueChange = onChange,
         onValueChangeFinished = onSettled,
-        modifier = Modifier.semantics { contentDescription = "Brightness" },
+        modifier = modifier.semantics { contentDescription = "Brightness" },
         thumb = {
             Box(
                 Modifier

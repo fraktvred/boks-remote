@@ -6,6 +6,14 @@ import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.core.EaseInCubic
+import androidx.compose.animation.core.EaseOutCubic
+import androidx.compose.animation.core.tween
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.window.DialogWindowProvider
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxSize
@@ -136,32 +144,42 @@ internal fun Modifier.sheetTopMargin() = statusBarsPadding().padding(top = 16.dp
 
 /**
  * A page of its own over the device screen, which stays as it was underneath: a full-screen window
- * with [top] as its top bar. [fromSide] slides it in from the right, like a page navigated to;
- * otherwise it rises a little, like an editor opened on the spot.
+ * with [top] as its top bar. [fromSide] slides it in from the right edge and back out to it, like a
+ * page navigated to; otherwise it rises a little, like an editor opened on the spot. [top] gets
+ * `close`, which takes the page away the way it came before calling [onDismiss], as Back does.
  */
 @Composable
 internal fun FullScreenPage(
     onDismiss: () -> Unit,
     fromSide: Boolean = false,
-    top: @Composable RowScope.() -> Unit,
+    top: @Composable RowScope.(close: () -> Unit) -> Unit,
     content: @Composable ColumnScope.() -> Unit,
 ) {
+    val shown = remember { MutableTransitionState(false).apply { targetState = true } }
+    // A side page leaves the way it came, and is dismissed once it has gone; an editor just goes.
+    val close = { if (fromSide) shown.targetState = false else onDismiss() }
+    if (fromSide && shown.isIdle && !shown.currentState) LaunchedEffect(Unit) { onDismiss() }
     Dialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = close,
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false, dismissOnClickOutside = false),
     ) {
-        val shown = remember { MutableTransitionState(false).apply { targetState = true } }
-        val enter = if (fromSide) slideInHorizontally { it / 8 } + fadeIn() else slideInVertically { it / 12 } + fadeIn()
-        AnimatedVisibility(shown, enter = enter) {
+        // The window's own dialog animation would play on top of the page's.
+        val window = (LocalView.current.parent as? DialogWindowProvider)?.window
+        SideEffect { window?.setWindowAnimations(0) }
+        val enter = if (fromSide) slideInHorizontally(tween(PAGE_MS, easing = EaseOutCubic)) { it } else slideInVertically { it / 12 } + fadeIn()
+        val exit = slideOutHorizontally(tween(PAGE_MS, easing = EaseInCubic)) { it }
+        AnimatedVisibility(shown, enter = enter, exit = exit) {
             Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
                 Column(Modifier.fillMaxSize().statusBarsPadding()) {
-                    Row(Modifier.fillMaxWidth().height(64.dp).padding(start = 4.dp, end = 16.dp), verticalAlignment = Alignment.CenterVertically, content = top)
+                    Row(Modifier.fillMaxWidth().height(64.dp).padding(start = 4.dp, end = 16.dp), verticalAlignment = Alignment.CenterVertically) { top(close) }
                     content()
                 }
             }
         }
     }
 }
+
+private const val PAGE_MS = 300
 
 /** A small label above a control inside a [SectionCard]. */
 @Composable

@@ -86,11 +86,12 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import dev.boksremote.BoksApp
+import dev.boksremote.BridgeControl
+import dev.boksremote.DevicePanel
 import dev.boksremote.protocol.Family
 import dev.boksremote.speaker.ConnectionState
 import dev.boksremote.speaker.EnergyLevel
-import dev.boksremote.speaker.SpeakerController
+import dev.boksremote.speaker.Feature
 import dev.boksremote.speaker.SpeakerState
 import dev.boksremote.speaker.StereoRole
 import dev.boksremote.speaker.TeamUpMode
@@ -102,9 +103,10 @@ private const val LEVEL_STEP = 13
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SpeakerScreen(speaker: SpeakerController, app: BoksApp, onBack: () -> Unit) {
+fun SpeakerScreen(panel: DevicePanel, onBack: () -> Unit) {
+    val speaker = panel.device
     val s by speaker.state.collectAsState()
-    val bridge by app.bridge.status.collectAsState()
+    val bridge by panel.bridge.status.collectAsState()
     val snackbar = remember { SnackbarHostState() }
     // The controller reports failures through the one-shot message; keep the ones the screen itself
     // shows (connection failure, wrong pincode) instead of only flashing them in a snackbar.
@@ -131,7 +133,7 @@ fun SpeakerScreen(speaker: SpeakerController, app: BoksApp, onBack: () -> Unit) 
                 title = { Text(shownName(s.name) ?: s.model?.label ?: s.kind.replaceFirstChar(Char::uppercase), maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back to device list") } },
                 actions = {
-                    if (s.rpcAvailable && connected) {
+                    if (Feature.RENAME in s.features && connected) {
                         IconButton(onClick = { renaming = true }) { Icon(Icons.Default.Edit, "Rename") }
                     }
                     if (connected) {
@@ -157,7 +159,7 @@ fun SpeakerScreen(speaker: SpeakerController, app: BoksApp, onBack: () -> Unit) 
                 // Branch on the panel's own state, not s.connection: a panel fading out would otherwise
                 // redraw as the panel for the new state, flashing "Disconnected" right after connecting.
                 when (shown) {
-                    ConnectionState.CONNECTED -> Controls(s, speaker, app)
+                    ConnectionState.CONNECTED -> Controls(s, panel)
                     ConnectionState.CONNECTING -> StatusPanel {
                         CircularProgressIndicator()
                         Spacer(Modifier.height(24.dp))
@@ -166,7 +168,7 @@ fun SpeakerScreen(speaker: SpeakerController, app: BoksApp, onBack: () -> Unit) 
                         Text("Keep the phone close to the ${s.kind}.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         Spacer(Modifier.height(24.dp))
                         TextButton(onClick = onBack) { Text("Cancel") }
-                        if (bridge.running) BridgeReconnectNote(app)
+                        if (bridge.running) BridgeReconnectNote(panel.bridge)
                     }
                     else -> StatusPanel {
                         IconBadge(Icons.Default.BluetoothDisabled, size = 88.dp, iconSize = 40.dp, container = MaterialTheme.colorScheme.errorContainer, content = MaterialTheme.colorScheme.onErrorContainer)
@@ -185,7 +187,7 @@ fun SpeakerScreen(speaker: SpeakerController, app: BoksApp, onBack: () -> Unit) 
                         Spacer(Modifier.height(24.dp))
                         Button(onClick = { connectionError = null; speaker.connect() }) { Text("Reconnect") }
                         TextButton(onClick = onBack) { Text("Back to device list") }
-                        if (bridge.running) BridgeReconnectNote(app)
+                        if (bridge.running) BridgeReconnectNote(panel.bridge)
                     }
                 }
             }
@@ -208,14 +210,14 @@ fun SpeakerScreen(speaker: SpeakerController, app: BoksApp, onBack: () -> Unit) 
             title = { Text("Power off ${shownName(s.name) ?: "the ${s.kind}"}?") },
             text = {
                 Text(
-                    if (s.rpcAvailable) "You'll need to switch it on at the ${s.kind} again. Restart turns it back on by itself."
+                    if (Feature.RESTART in s.features) "You'll need to switch it on at the ${s.kind} again. Restart turns it back on by itself."
                     else "You'll need to switch it on at the ${s.kind} again.",
                 )
             },
             confirmButton = {
                 Row {
-                    if (s.rpcAvailable) TextButton(onClick = { speaker.restart(); confirmPowerOff = false }) { Text("Restart") }
-                    TextButton(onClick = { speaker.powerOff(); confirmPowerOff = false }) { Text("Power off") }
+                    if (Feature.RESTART in s.features) TextButton(onClick = { speaker.restart(); confirmPowerOff = false }) { Text("Restart") }
+                    TextButton(onClick = { panel.control.powerOff(); confirmPowerOff = false }) { Text("Power off") }
                 }
             },
             dismissButton = { TextButton(onClick = { confirmPowerOff = false }) { Text("Cancel") } },
@@ -224,10 +226,17 @@ fun SpeakerScreen(speaker: SpeakerController, app: BoksApp, onBack: () -> Unit) 
 }
 
 @Composable
-private fun Controls(s: SpeakerState, speaker: SpeakerController, app: BoksApp) {
-    val bridge by app.bridge.status.collectAsState()
-    val cycle by app.cycle.status.collectAsState()
-    val sleep by app.sleep.status.collectAsState()
+private fun Controls(s: SpeakerState, panel: DevicePanel) {
+    val speaker = panel.device
+    val bridge by panel.bridge.status.collectAsState()
+    val stage = panel.stage
+    val cycle by stage.cycle.status.collectAsState()
+    val sleep by stage.sleep.collectAsState()
+    val stageStatus by stage.status.collectAsState()
+    val sceneLight by stage.light.collectAsState()
+    // The DMX bridge drives every channel of a leased light, so its controls would only fight it.
+    val leased = stageStatus.leased && sceneLight === speaker
+    val control = panel.control
     DeviceHeader(s, speaker.demo)
     if (s.locked) {
         Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
@@ -262,20 +271,26 @@ private fun Controls(s: SpeakerState, speaker: SpeakerController, app: BoksApp) 
         }
     }
     val brightness = s.brightness
-    if (brightness != null) {
+    if (leased) {
+        SectionCard("Light", Icons.Default.Lightbulb) {
+            HintText("The DMX bridge has the light. Its colours, brightness, scenes, Cycle and Sleep fade come back when the bridge stops.")
+        }
+    } else if (brightness != null) {
         // Drawn in the light's colours, or a neutral stand-in while it runs its defaults. Moving the fader takes over from a running fade.
         val colors = s.palette?.takeUnless { s.paletteIsDefault }?.colors ?: DEFAULT_ART
-        LightLookCard(brightness, colors, s.energyLevel, app.session::setBrightness, speaker::setEnergyLevel)
+        LightLookCard(brightness, colors, s.energyLevel, control::setBrightness, control::setMode)
     } else {
         s.energyLevel?.let { level ->
-            SectionCard("Light mode", Icons.Default.Lightbulb) { LightModePicker(level, speaker::setEnergyLevel) }
+            SectionCard("Light mode", Icons.Default.Lightbulb) { LightModePicker(level, control::setMode) }
         }
     }
-    if (s.family == Family.LIGHT && s.rpcAvailable) {
-        ScenesSection(s, app) { PaletteSection(s, speaker, app.palettes, app.cycle) }
-        SectionCard("Cycle", Icons.Default.Autorenew, trailing = { if (cycle.running) LiveBadge(receiving = true) }) { CycleSection(app, speaker) }
-        SectionCard("Sleep fade", Icons.Default.Bedtime, trailing = { if (sleep.running) LiveBadge(receiving = true) }) { SleepSection(app, speaker, bridge.running) }
-        SectionCard("Effects", Icons.Default.Whatshot, trailing = { HintText("Hold, slide up to lock") }) { FxPad(speaker) }
+    if (Feature.LIGHT_CONTENT in s.features) {
+        if (!leased) {
+            ScenesSection(s, panel) { PaletteSection(s, control, panel.workspace.palettes) }
+            SectionCard("Cycle", Icons.Default.Autorenew, trailing = { if (cycle.running) LiveBadge(receiving = true) }) { CycleSection(panel) }
+            SectionCard("Sleep fade", Icons.Default.Bedtime, trailing = { if (sleep.running) LiveBadge(receiving = true) }) { SleepSection(panel) }
+            SectionCard("Effects", Icons.Default.Whatshot, trailing = { HintText("Hold, slide up to lock") }) { FxPad(speaker) }
+        }
         // Folded by default: most sessions never use it, and the status line says enough until they do.
         var dmxExpanded by rememberSaveable { mutableStateOf(false) }
         SectionCard(
@@ -285,12 +300,12 @@ private fun Controls(s: SpeakerState, speaker: SpeakerController, app: BoksApp) 
             expanded = dmxExpanded,
             onExpandedChange = { dmxExpanded = it },
         ) {
-            if (dmxExpanded) DmxSection(app) else DmxSummary(app)
+            if (dmxExpanded) DmxSection(panel.bridge) else DmxSummary(panel.bridge)
         }
     }
-    if (s.eq != null || (s.family == Family.BIFROST && s.rpcAvailable)) {
-        SectionCard("Sound profiles & EQ", Icons.Default.Equalizer) { EqSection(s, speaker, app.eqPresets) }
-        RoomTuning(s, speaker, app.eqPresets)
+    if (Feature.EQ in s.features) {
+        SectionCard("Sound profiles & EQ", Icons.Default.Equalizer) { EqSection(s, speaker, panel.workspace.eqPresets) }
+        RoomTuning(s, speaker, panel.workspace.eqPresets)
     }
     if (s.teamUp != null || s.stereoRole != null) {
         SectionCard("Team-up", Icons.Default.Groups) {
@@ -402,11 +417,11 @@ internal fun HintText(text: String, modifier: Modifier = Modifier) {
 
 /** The DMX controls are hidden while the light is away, so the running bridge stays visible and stoppable here. */
 @Composable
-private fun BridgeReconnectNote(app: BoksApp) {
+private fun BridgeReconnectNote(bridge: BridgeControl) {
     Spacer(Modifier.height(32.dp))
     Text("The DMX bridge is still running and reconnects to the light by itself.", textAlign = TextAlign.Center, style = MaterialTheme.typography.bodySmall)
     Spacer(Modifier.height(8.dp))
-    OutlinedButton(onClick = app::stopBridge) { Text("Stop bridge") }
+    OutlinedButton(onClick = bridge::stop) { Text("Stop bridge") }
 }
 
 /**

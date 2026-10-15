@@ -33,7 +33,7 @@ import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.runtime.collectAsState
 import androidx.compose.foundation.layout.width
-import dev.boksremote.speaker.PaletteCycle
+import dev.boksremote.speaker.Stage
 import dev.boksremote.speaker.PaletteKind
 import dev.boksremote.speaker.PaletteLibrary
 import androidx.compose.material3.Icon
@@ -42,6 +42,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableFloatStateOf
@@ -72,14 +73,14 @@ import dev.boksremote.speaker.SpeakerController
 import dev.boksremote.speaker.SpeakerState
 
 @Composable
-fun PaletteSection(s: SpeakerState, speaker: SpeakerController, store: PaletteLibrary, cycle: PaletteCycle) {
+fun PaletteSection(s: SpeakerState, control: Stage.LightControl, store: PaletteLibrary) {
     val saved by store.palettes.collectAsState()
-    val recent by store.recentColors.collectAsState()
     // Null while the light runs its default colours: it picks them itself, so a neutral stand-in is shown.
     val current = s.palette?.takeUnless { s.paletteIsDefault }
     val shown = current?.colors ?: DEFAULT_ART
-    var browsing by remember { mutableStateOf(false) }
-    var draft by remember { mutableStateOf<PaletteDraft?>(null) }
+    val pages = remember { PalettePagesState() }
+    var browsing by pages::browsing
+    var draft by pages::draft
     val kind = remember(current, saved) { store.kind(current) }
     val unsaved = kind == PaletteKind.UNSAVED
 
@@ -120,27 +121,47 @@ fun PaletteSection(s: SpeakerState, speaker: SpeakerController, store: PaletteLi
     SwatchStrip(shown, ::editCurrent, Modifier.padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 18.dp))
     if (current == null) HintText("Tap a colour to make your own palette.", Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp))
 
+    PalettePages(pages, s, control, store)
+}
+
+/** Where the palettes page and its editor are: the page open, and the palette being edited. */
+@Stable
+internal class PalettePagesState {
+    var browsing by mutableStateOf(false)
+    var draft by mutableStateOf<PaletteDraft?>(null)
+}
+
+/** The palettes page and the editor it opens, over whichever screen opened them, acting on [control]'s light. */
+@Composable
+internal fun PalettePages(pages: PalettePagesState, s: SpeakerState, control: Stage.LightControl, store: PaletteLibrary) {
+    val saved by store.palettes.collectAsState()
+    val recent by store.recentColors.collectAsState()
+    val current = s.palette?.takeUnless { s.paletteIsDefault }
+    val shown = current?.colors ?: DEFAULT_ART
+    var browsing by pages::browsing
+    var draft by pages::draft
+
     if (browsing) {
         PalettesPage(
             active = s.palette,
             activeIsDefault = s.paletteIsDefault,
             saved = saved,
             // A palette picked by hand wins over Cycle, which then waits for Resume.
-            onApply = { cycle.showByHand(speaker, it) },
-            onResetDefault = { cycle.showByHand(speaker, null) },
+            onApply = { control.showPalette(it) },
+            onResetDefault = { control.showPalette(null) },
             onNew = { draft = PaletteDraft(null, store.suggestName("My palette"), shown) },
             onEdit = { draft = PaletteDraft(it, it.name, it.colors) },
             onDuplicate = { draft = PaletteDraft(null, store.suggestName(it.name), it.colors) },
             onRename = { p, name ->
                 val renamed = store.rename(p, name)
-                if (current?.name == p.name) cycle.updateShown(speaker, renamed)
+                if (current?.name == p.name) control.updateShown(renamed)
             },
             onDelete = store::delete,
             onDismiss = { browsing = false },
         )
     }
     draft?.let { d ->
-        val session = remember(d) { cycle.preview(speaker) }
+        val session = remember(d) { control.preview() }
         PaletteEditorPage(
             draft = d,
             onLight = current?.colors,
@@ -368,7 +389,7 @@ private fun HoldPad(
     }
 }
 
-private val EnergyLevel.icon: ImageVector
+internal val EnergyLevel.icon: ImageVector
     get() = when (this) {
         EnergyLevel.LOW -> Icons.Default.Waves
         EnergyLevel.MEDIUM -> Icons.Default.MusicNote

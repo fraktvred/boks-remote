@@ -4,6 +4,10 @@ import android.Manifest
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -50,27 +54,28 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
-import dev.boksremote.BoksApp
+import dev.boksremote.BridgeControl
 import dev.boksremote.dmx.DmxConfig
 import dev.boksremote.dmx.DmxProtocol
 import dev.boksremote.dmx.DmxStatus
 import dev.boksremote.dmx.LightboksPersonality
 
 @Composable
-fun DmxSection(app: BoksApp) {
-    val status by app.bridge.status.collectAsState()
-    val config by app.dmxConfig.collectAsState()
+fun DmxSection(bridge: BridgeControl) {
+    val status by bridge.status.collectAsState()
+    val config by bridge.config.collectAsState()
     var showMap by remember { mutableStateOf(false) }
-    val notifications = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { app.startBridge() }
+    val notifications = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { bridge.start() }
 
     HintText("Receive DMX over Wi-Fi from a lighting desk or software and drive this Lightboks. Keeps running with the screen off.")
     // Status first while running: it says where to send, which is what the user needs at that moment.
-    AnimatedVisibility(visible = status.running) { BridgeStatusCard(status, config) }
-    ConfigEditor(config, onChange = app::updateDmxConfig)
+    // Outside a Column scope the default grows the panel out of its top-left corner; it opens downward instead.
+    AnimatedVisibility(visible = status.running, enter = OPEN, exit = CLOSE) { BridgeStatusCard(status, config) }
+    ConfigEditor(config, onChange = bridge::update)
     Row(verticalAlignment = Alignment.CenterVertically) {
         if (status.running) {
             Button(
-                onClick = app::stopBridge,
+                onClick = bridge::stop,
                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error, contentColor = MaterialTheme.colorScheme.onError),
             ) {
                 Icon(Icons.Default.Stop, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
@@ -91,14 +96,14 @@ fun DmxSection(app: BoksApp) {
             Icon(if (showMap) Icons.Default.ExpandLess else Icons.Default.ExpandMore, contentDescription = null)
         }
     }
-    AnimatedVisibility(visible = showMap) { ChannelMap(config) }
+    AnimatedVisibility(visible = showMap, enter = OPEN, exit = CLOSE) { ChannelMap(config) }
 }
 
 /** The folded DMX card: whether the bridge runs and what it is doing, in a line or two. */
 @Composable
-fun DmxSummary(app: BoksApp) {
-    val status by app.bridge.status.collectAsState()
-    val config by app.dmxConfig.collectAsState()
+fun DmxSummary(bridge: BridgeControl) {
+    val status by bridge.status.collectAsState()
+    val config by bridge.config.collectAsState()
     val target = "${config.protocol.label} universe ${config.universe}"
     if (!status.running) {
         HintText("Off · $target")
@@ -242,3 +247,7 @@ private fun ChannelMap(config: DmxConfig) {
         }
     }
 }
+
+/** Panels in the section open and close downward, across their full width. */
+private val OPEN = fadeIn() + expandVertically()
+private val CLOSE = fadeOut() + shrinkVertically()

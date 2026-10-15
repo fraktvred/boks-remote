@@ -22,9 +22,19 @@ interface LightLink {
 }
 
 /**
+ * The writes that set what a Lightboks shows, each finished once the light has it: for the DMX
+ * bridge, which paces its own writes, through its [Stage.Lease].
+ */
+interface LightOutput {
+    suspend fun applyFx(id: UUID)
+    suspend fun applyBrightness(value: Int)
+    suspend fun applyEnergyLevel(level: EnergyLevel)
+    suspend fun applyPalette(palette: LightPalette, id: UUID = UUID.randomUUID())
+}
+
+/**
  * What a Lightboks shows: brightness, light mode, palette and effects, written in the order its
- * firmware needs, with [state] following what the light was last told. [SpeakerController] makes one
- * per connection; the DMX bridge paces its own writes through it.
+ * firmware needs, with [state] following what the light was last told. [SpeakerController] makes one.
  *
  * [report] hears of a failed step: with what failed, or with null for an optional step that older
  * firmware may lack.
@@ -35,14 +45,14 @@ class Lightboks(
     private val scope: CoroutineScope,
     private val report: (what: String?, e: Exception) -> Unit,
     private val clock: () -> Long = SystemClock::elapsedRealtime,
-) {
+) : LightOutput {
     /**
      * One light-content write at a time, in the order they were made. A light mode change is two
      * writes, and a palette landing between them doesn't show until the next mode change.
      */
     private val content = Mutex()
 
-    suspend fun applyBrightness(value: Int) {
+    override suspend fun applyBrightness(value: Int) {
         val v = value.coerceIn(0, 255)
         link.write(Uuids.LIGHT_BRIGHTNESS, byteArrayOf(v.toByte()))
         state.update { it.copy(brightness = v) }
@@ -52,7 +62,7 @@ class Lightboks(
      * Mirrors the official app's order: Uplight starts the built-in program and then reports level 3;
      * the other modes write their level and then clear any program (an energy-level write of 3 alone is rejected).
      */
-    suspend fun applyEnergyLevel(level: EnergyLevel) = content.withLock {
+    override suspend fun applyEnergyLevel(level: EnergyLevel) = content.withLock {
         if (level == EnergyLevel.CUSTOM) {
             checkStatus(link.call(SERVICE, "SetCustomProgram", LightContentCodec.customProgramRequest(UPLIGHT_PROGRAM)))
             link.write(Uuids.LIGHT_ENERGY_LEVEL, byteArrayOf(level.ordinal.toByte()))
@@ -65,7 +75,7 @@ class Lightboks(
     }
 
     /** Sends a palette. A fresh id by default, so the light never keeps a cached copy of an earlier edit. */
-    suspend fun applyPalette(palette: LightPalette, id: UUID = UUID.randomUUID()) = send(palette, id, publish = true)
+    override suspend fun applyPalette(palette: LightPalette, id: UUID) = send(palette, id, publish = true)
 
     /** [publish] false leaves [state] as it is, for a step on the way to another palette. */
     private suspend fun send(palette: LightPalette, id: UUID, publish: Boolean) = content.withLock {
@@ -98,7 +108,7 @@ class Lightboks(
     }
 
     /** Starts a built-in animation; [LightContentCodec.NO_ID] stops it. */
-    suspend fun applyFx(id: UUID) = content.withLock {
+    override suspend fun applyFx(id: UUID) = content.withLock {
         checkStatus(link.call(SERVICE, "SetAnimation", LightContentCodec.animationRequest(id)))
     }
 
@@ -156,7 +166,7 @@ class Lightboks(
         private const val SERVICE = "LightContentService"
         private const val DROP_MS = 2_000L
         /**
-         * Each palette sent may cost the light a flash write (see DmxBridge); fewer than this and a fade
+         * Each palette sent may cost the light a flash write (see LookSender); fewer than this and a fade
          * shows its steps. 12 over 3 s is one every ~270 ms, about the DMX bridge's own limit.
          */
         const val FADE_STEPS = 12

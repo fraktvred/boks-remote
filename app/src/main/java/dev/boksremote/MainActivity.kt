@@ -26,6 +26,7 @@ import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LifecycleResumeEffect
+import androidx.lifecycle.compose.LifecycleStartEffect
 import dev.boksremote.ui.PermissionScreen
 import dev.boksremote.ui.ScanScreen
 import dev.boksremote.ui.SpeakerScreen
@@ -65,14 +66,19 @@ private fun App(app: BoksApp) {
         )
         return
     }
+    // The list keeps its devices connected for their quick settings only while the app is on screen.
+    LifecycleStartEffect(Unit) {
+        app.setForeground(true)
+        onStopOrDispose { app.setForeground(false) }
+    }
     val speaker by app.speaker.collectAsState()
     val demoMode by app.demoMode.collectAsState()
     val current = speaker
     if (current == null) {
-        ScanScreen(app.scanner, demoMode, onDemoModeChange = app::setDemoMode, onOpen = app::open, onOpenDemo = app::openDemo)
+        ScanScreen(app, demoMode, onDemoModeChange = app::setDemoMode, onOpen = app::open, onOpenDemo = app::openDemo)
     } else {
         BackHandler { app.close() }
-        SpeakerScreen(current, app, onBack = app::close)
+        SpeakerScreen(remember(current) { app.panelOf(current) }, onBack = app::close)
     }
 }
 

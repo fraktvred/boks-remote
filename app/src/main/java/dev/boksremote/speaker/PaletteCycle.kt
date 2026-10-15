@@ -74,11 +74,11 @@ class CycleOrder(private val random: Random = Random.Default) {
 
 /**
  * Cycle: changes the Lightboks palette every [CycleConfig.intervalSeconds] through the user's chosen
- * palettes. Lives in [dev.boksremote.BoksApp] next to the DMX bridge so it keeps going with the
- * screen off, while the light-session service keeps the process in the foreground.
+ * palettes. Part of a [Stage], which hands it the scene light, so it keeps going with the screen off
+ * while the light-session service keeps the process in the foreground.
  *
  * Cycle owns the rule that a palette picked by hand wins over it: every palette the user puts on the
- * light goes through [showByHand] or a [Preview], which pause it, so nothing has to remember to.
+ * scene light goes through [showByHand] or a [Preview], which pause it, so nothing has to remember to.
  */
 class PaletteCycle(
     private val scope: CoroutineScope,
@@ -87,14 +87,14 @@ class PaletteCycle(
     private val clock: Clock = Clock.ELAPSED,
     private val awake: KeepAwake = KeepAwake.NONE,
     random: Random = Random.Default,
-) : PaletteLibrary.User {
+) : PaletteLibrary.User, CycleView {
     private val _config = MutableStateFlow(store.load())
-    val config: StateFlow<CycleConfig> = _config
+    override val config: StateFlow<CycleConfig> = _config
     private val _status = MutableStateFlow<CycleStatus>(CycleStatus.Stopped)
-    val status: StateFlow<CycleStatus> = _status
+    override val status: StateFlow<CycleStatus> = _status
     private val _largePreviews = MutableStateFlow(store.largePreviews)
     /** See [CycleConfigStore.largePreviews]. */
-    val largePreviews: StateFlow<Boolean> = _largePreviews
+    override val largePreviews: StateFlow<Boolean> = _largePreviews
     private val _lent = MutableStateFlow(false)
     /** True while the light is lent to the DMX bridge: Cycle waits paused and won't start. */
     val lent: StateFlow<Boolean> = _lent
@@ -110,20 +110,20 @@ class PaletteCycle(
     }
 
     /** The cycle's palettes that still exist, in order: a deleted palette drops out. */
-    fun palettes(): List<LightPalette> = _config.value.names.mapNotNull(library::resolve)
+    override fun palettes(): List<LightPalette> = _config.value.names.mapNotNull(library::resolve)
 
     /** Whether Start (or Resume) would play: enough palettes, and the light isn't lent out. */
     fun canStart(): Boolean = !_lent.value && palettes().size >= CycleConfig.MIN_PALETTES
 
     /** 1-based place of the palette playing in [palettes], or 0. */
-    fun position(): Int = palettes().indexOfFirst { it.name == _status.value.current } + 1
+    override fun position(): Int = palettes().indexOfFirst { it.name == _status.value.current } + 1
 
-    fun setLargePreviews(on: Boolean) {
+    override fun setLargePreviews(on: Boolean) {
         _largePreviews.value = on
         store.largePreviews = on
     }
 
-    fun update(config: CycleConfig) {
+    override fun update(config: CycleConfig) {
         val old = _config.value
         save(config)
         if (!_status.value.running) return
@@ -253,7 +253,7 @@ class PaletteCycle(
     /** A palette editor's session on [light]: previews pause Cycle, and cancelling puts back what was there. */
     fun preview(light: Light) = Preview(light)
 
-    inner class Preview internal constructor(private val light: Light) {
+    inner class Preview internal constructor(private val light: Light) : PalettePreview {
         /** Null when the light ran its default colours. */
         private val before = light.state.value.ownPalette
         private var previewing = false
@@ -262,7 +262,7 @@ class PaletteCycle(
         /** When it was running: the palette it was on, with the time that palette had left. */
         private var frozen: CycleStatus.Paused? = null
 
-        fun show(colors: List<HsvColor>) {
+        override fun show(colors: List<HsvColor>) {
             if (!previewing) {
                 previewing = true
                 found = _status.value
@@ -273,7 +273,7 @@ class PaletteCycle(
         }
 
         /** Undoes the previews: a running Cycle plays on from the very palette it was on, with the time it had left. */
-        fun cancel() {
+        override fun cancel() {
             if (!previewing) return
             previewing = false
             this@PaletteCycle.light = light
@@ -292,13 +292,13 @@ class PaletteCycle(
         }
 
         /** Leaves [palette] on the light: a palette picked by hand, so Cycle stays paused. */
-        fun keep(palette: LightPalette) {
+        override fun keep(palette: LightPalette) {
             previewing = false
             showByHand(light, palette)
         }
 
         /** New colours for the palette the light already shows; Cycle, if running, isn't interrupted. */
-        fun refresh(palette: LightPalette) {
+        override fun refresh(palette: LightPalette) {
             previewing = false
             updateShown(light, palette)
         }

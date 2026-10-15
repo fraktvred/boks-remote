@@ -253,8 +253,8 @@ fun PalettesPage(
     FullScreenPage(
         onDismiss = onDismiss,
         fromSide = true,
-        top = {
-            IconButton(onClick = onDismiss) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
+        top = { close ->
+            IconButton(onClick = close) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
             Text("Colour palettes", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(start = 4.dp))
         },
     ) {

@@ -1,5 +1,6 @@
 package dev.boksremote.ble
 
+import dev.boksremote.ScanPort
 import android.annotation.SuppressLint
 import android.bluetooth.BluetoothManager
 import android.bluetooth.le.ScanCallback
@@ -18,11 +19,11 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 
 @SuppressLint("MissingPermission") // the UI starts scanning only after BLUETOOTH_SCAN is granted
-class Scanner(context: Context) {
+class Scanner(context: Context) : ScanPort {
     private val adapter = context.getSystemService(BluetoothManager::class.java).adapter
 
     private val _results = MutableStateFlow<Map<String, Advertisement>>(emptyMap())
-    val results: StateFlow<Map<String, Advertisement>> = _results
+    override val results: StateFlow<Map<String, Advertisement>> = _results
 
     private val _scanning = MutableStateFlow(false)
     val scanning: StateFlow<Boolean> = _scanning
@@ -64,7 +65,7 @@ class Scanner(context: Context) {
      * ignores an app's sixth start within 30 s, which would end in "nothing found", so a start
      * that would exceed [MAX_STARTS] waits until the oldest one leaves the window.
      */
-    fun start() {
+    override fun start() {
         if (adapter?.bluetoothLeScanner == null) return
         _results.value = emptyMap()
         if (_scanning.value) {
@@ -92,7 +93,7 @@ class Scanner(context: Context) {
         handler.postDelayed(timeout, SCAN_MS)
     }
 
-    fun stop() {
+    override fun stop() {
         handler.removeCallbacks(timeout)
         handler.removeCallbacks(begin)
         if (!_scanning.value) return
@@ -100,6 +101,9 @@ class Scanner(context: Context) {
         started = false
         _scanning.value = false
     }
+
+    /** Takes [address] off the results, for a device that has gone; a scan that finds it again puts it back. */
+    override fun forget(address: String) = _results.update { it - address }
 
     fun device(address: String) = adapter.getRemoteDevice(address)
 

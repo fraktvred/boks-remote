@@ -105,7 +105,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.text.font.FontWeight
 
-private fun profileIcon(title: String): ImageVector = when (title) {
+internal fun profileIcon(title: String): ImageVector = when (title) {
     "Bass+" -> Icons.Default.GraphicEq
     "Outdoor" -> Icons.Default.Park
     "Indoor" -> Icons.Default.Home
@@ -346,7 +346,7 @@ private fun NewEqCard(selected: Boolean, onClick: () -> Unit) {
 }
 
 @Composable
-private fun EqSparkline(bands: List<Int>, color: Color, modifier: Modifier) {
+internal fun EqSparkline(bands: List<Int>, color: Color, modifier: Modifier) {
     Canvas(modifier) {
         val span = (EqCurve.MAX_DB - EqCurve.MIN_DB).toFloat()
         val path = eqPath(bands, { i -> i * size.width / (EqCurve.BANDS - 1) }, { db -> (EqCurve.MAX_DB - db) / span * size.height })
