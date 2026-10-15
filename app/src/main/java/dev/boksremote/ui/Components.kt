@@ -54,7 +54,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -97,7 +96,7 @@ internal fun SectionCard(
         modifier = modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = cardContainer),
     ) {
-        Column(Modifier.animateContentSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(Modifier.animateContentSize().padding(Spacing.l), verticalArrangement = Arrangement.spacedBy(Spacing.m)) {
             // The whole header toggles, but only the chevron shows the press.
             val press = remember { MutableInteractionSource() }
             val header = if (expanded == null) Modifier else Modifier.clickable(
@@ -107,11 +106,11 @@ internal fun SectionCard(
             ) { onExpandedChange(!expanded) }
             Row(header, verticalAlignment = Alignment.CenterVertically) {
                 Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
-                Spacer(Modifier.width(8.dp))
+                Spacer(Modifier.width(Spacing.s))
                 Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
                 trailing()
                 if (expanded != null) {
-                    Spacer(Modifier.width(4.dp))
+                    Spacer(Modifier.width(Spacing.xs))
                     Icon(
                         if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
                         contentDescription = null,
@@ -126,32 +125,23 @@ internal fun SectionCard(
 }
 
 /**
- * The cards on the device list and device screens, a clear step above the page. In the dark theme the
- * page (see AppTheme), a card and the [tileContainer]s on it climb in even steps of the same tinted grey.
- */
-internal val cardContainer: Color
-    @Composable get() = MaterialTheme.colorScheme.run { if (surface.luminance() < 0.5f) surfaceContainerHigh else surfaceContainer }
-
-/** A tile or track on a card, the next step above [cardContainer]. */
-internal val tileContainer: Color
-    @Composable get() = MaterialTheme.colorScheme.run { if (surface.luminance() < 0.5f) surfaceBright else surfaceContainerHighest }
-
-/**
  * For a [androidx.compose.material3.ModalBottomSheet]: a tall sheet otherwise expands up under the
  * status bar, so this keeps it below it with a gap that shows the screen behind.
  */
-internal fun Modifier.sheetTopMargin() = statusBarsPadding().padding(top = 16.dp)
+internal fun Modifier.sheetTopMargin() = statusBarsPadding().padding(top = Spacing.l)
 
 /**
  * A page of its own over the device screen, which stays as it was underneath: a full-screen window
  * with [top] as its top bar. [fromSide] slides it in from the right edge and back out to it, like a
  * page navigated to; otherwise it rises a little, like an editor opened on the spot. [top] gets
- * `close`, which takes the page away the way it came before calling [onDismiss], as Back does.
+ * `close`, which takes the page away the way it came before calling [onDismiss], as Back does unless
+ * [onBack] handles it, such as a step back through a wizard.
  */
 @Composable
 internal fun FullScreenPage(
     onDismiss: () -> Unit,
     fromSide: Boolean = false,
+    onBack: (() -> Unit)? = null,
     top: @Composable RowScope.(close: () -> Unit) -> Unit,
     content: @Composable ColumnScope.() -> Unit,
 ) {
@@ -160,7 +150,7 @@ internal fun FullScreenPage(
     val close = { if (fromSide) shown.targetState = false else onDismiss() }
     if (fromSide && shown.isIdle && !shown.currentState) LaunchedEffect(Unit) { onDismiss() }
     Dialog(
-        onDismissRequest = close,
+        onDismissRequest = onBack ?: close,
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false, dismissOnClickOutside = false),
     ) {
         // The window's own dialog animation would play on top of the page's.
@@ -171,7 +161,7 @@ internal fun FullScreenPage(
         AnimatedVisibility(shown, enter = enter, exit = exit) {
             Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
                 Column(Modifier.fillMaxSize().statusBarsPadding()) {
-                    Row(Modifier.fillMaxWidth().height(64.dp).padding(start = 4.dp, end = 16.dp), verticalAlignment = Alignment.CenterVertically) { top(close) }
+                    Row(Modifier.fillMaxWidth().height(64.dp).padding(start = Spacing.xs, end = Spacing.l), verticalAlignment = Alignment.CenterVertically) { top(close) }
                     content()
                 }
             }
@@ -189,12 +179,13 @@ internal fun ControlLabel(text: String) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun <T> Choice(options: List<T>, selected: T?, label: (T) -> String, onSelect: (T) -> Unit) {
+internal fun <T> Choice(options: List<T>, selected: T?, label: (T) -> String, enabled: Boolean = true, onSelect: (T) -> Unit) {
     val haptics = LocalHapticFeedback.current
     SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
         options.forEachIndexed { i, option ->
             SegmentedButton(
                 selected = option == selected,
+                enabled = enabled,
                 onClick = {
                     if (option != selected) haptics.performHapticFeedback(HapticFeedbackType.SegmentTick)
                     onSelect(option)

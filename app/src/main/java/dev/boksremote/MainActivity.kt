@@ -12,21 +12,17 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.dynamicDarkColorScheme
-import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.graphics.lerp
-import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.LifecycleStartEffect
+import dev.boksremote.ui.AppTheme
 import dev.boksremote.ui.PermissionScreen
 import dev.boksremote.ui.ScanScreen
 import dev.boksremote.ui.SpeakerScreen
@@ -80,16 +76,4 @@ private fun App(app: BoksApp) {
         BackHandler { app.close() }
         SpeakerScreen(remember(current) { app.panelOf(current) }, onBack = app::close)
     }
-}
-
-@Composable
-private fun AppTheme(content: @Composable () -> Unit) {
-    val context = LocalContext.current
-    val scheme = if (isSystemInDarkTheme()) {
-        // A charcoal page rather than near-black, so page, cards and the tiles on them climb in even steps.
-        dynamicDarkColorScheme(context).let { val page = lerp(it.surface, it.surfaceContainerLow, 0.5f); it.copy(background = page, surface = page) }
-    } else {
-        dynamicLightColorScheme(context)
-    }
-    MaterialTheme(colorScheme = scheme, content = content)
 }

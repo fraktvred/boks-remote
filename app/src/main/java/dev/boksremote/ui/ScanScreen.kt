@@ -118,11 +118,11 @@ fun ScanScreen(
         topBar = {
             // The menu sits beside the title rather than in a row above it, as in a large app bar.
             Row(
-                Modifier.fillMaxWidth().windowInsetsPadding(TopAppBarDefaults.windowInsets).heightIn(min = 80.dp).padding(start = 16.dp, end = 4.dp),
+                Modifier.fillMaxWidth().windowInsetsPadding(TopAppBarDefaults.windowInsets).heightIn(min = 80.dp).padding(start = Spacing.l, end = Spacing.xs),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 AppMark(40.dp)
-                Spacer(Modifier.width(12.dp))
+                Spacer(Modifier.width(Spacing.m))
                 AppTitle(Modifier.weight(1f))
                 ScanMenu(demoMode, onDemoModeChange)
             }
@@ -144,7 +144,7 @@ fun ScanScreen(
                 // The dummies scroll with the list, so their quick settings never squeeze the real devices out.
                 demoMode || (bluetoothOn && list.isNotEmpty()) -> LazyColumn(
                     contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(Spacing.m),
                     modifier = Modifier.fillMaxSize(),
                 ) {
                     if (demoMode) {
@@ -200,7 +200,7 @@ fun ScanScreen(
 /** A line under the list, centred, with an optional button. */
 @Composable
 private fun ListNote(text: String, action: String? = null, onAction: () -> Unit = {}, modifier: Modifier = Modifier) {
-    Column(modifier.fillMaxWidth().padding(top = 4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+    Column(modifier.fillMaxWidth().padding(top = Spacing.xs), horizontalAlignment = Alignment.CenterHorizontally) {
         Text(text, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
         if (action != null) TextButton(onClick = onAction) { Text(action) }
     }
@@ -213,12 +213,12 @@ private fun ScanHeader(scanning: Boolean, onScan: () -> Unit) {
         Text("Nearby", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
         if (scanning) {
             CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.5.dp, trackColor = MaterialTheme.colorScheme.surfaceContainerHighest)
-            Spacer(Modifier.width(8.dp))
-            Text("Scanning", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(end = 12.dp))
+            Spacer(Modifier.width(Spacing.s))
+            Text("Scanning", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(end = Spacing.m))
         } else {
             TextButton(onClick = onScan) {
                 Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(8.dp))
+                Spacer(Modifier.width(Spacing.s))
                 Text("Scan again")
             }
         }
@@ -290,11 +290,11 @@ private fun DeviceRow(ad: Advertisement, modifier: Modifier, demo: Boolean = fal
     ) {
         Column(Modifier.animateContentSize()) {
             Row(
-                Modifier.fillMaxWidth().clickable(onClick = onClick).padding(start = 16.dp, end = 16.dp, top = 20.dp, bottom = 16.dp),
+                Modifier.fillMaxWidth().clickable(onClick = onClick).padding(start = Spacing.l, end = Spacing.l, top = Spacing.l, bottom = Spacing.l),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 DeviceBadge(ad.family, size = 56.dp)
-                Spacer(Modifier.width(16.dp))
+                Spacer(Modifier.width(Spacing.l))
                 Column(Modifier.weight(1f)) {
                     Text(shownName(ad.name) ?: ad.model?.label ?: "SOUNDBOKS device", style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     val details = listOfNotNull(ad.model?.label?.takeIf { it != ad.name }, ad.firmware?.let { "Firmware $it" })
@@ -313,7 +313,7 @@ private fun DeviceRow(ad: Advertisement, modifier: Modifier, demo: Boolean = fal
                         Icons.Default.Lock,
                         contentDescription = if (ad.security.locked) "Anti-theft locked" else "Pincode protected",
                         tint = colors.onSurfaceVariant,
-                        modifier = Modifier.padding(end = 8.dp).size(20.dp),
+                        modifier = Modifier.padding(end = Spacing.s).size(20.dp),
                     )
                 }
                 if (!demo) {
@@ -326,7 +326,7 @@ private fun DeviceRow(ad: Advertisement, modifier: Modifier, demo: Boolean = fal
                 }
                 Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = colors.onSurfaceVariant)
             }
-            Box(Modifier.padding(start = 16.dp, end = 16.dp, bottom = 16.dp)) { quickSettings() }
+            Box(Modifier.padding(start = Spacing.l, end = Spacing.l, bottom = Spacing.l)) { quickSettings() }
         }
     }
 }
@@ -342,20 +342,20 @@ private fun signalIcon(rssi: Int): ImageVector = when {
 @Composable
 private fun EmptyState(icon: ImageVector, title: String, body: String, action: String? = null, onAction: () -> Unit = {}, searching: Boolean = false) {
     Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(32.dp),
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(Spacing.xxl),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Spacer(Modifier.height(32.dp))
+        Spacer(Modifier.height(Spacing.xxl))
         Box(Modifier.size(176.dp), contentAlignment = Alignment.Center) {
             if (searching) Pulse(Modifier.matchParentSize())
             IconBadge(icon, size = 88.dp, iconSize = 40.dp, container = MaterialTheme.colorScheme.secondaryContainer, content = MaterialTheme.colorScheme.onSecondaryContainer)
         }
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(Spacing.s))
         Text(title, style = MaterialTheme.typography.titleLarge, textAlign = TextAlign.Center)
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(Spacing.s))
         Text(body, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
         if (action != null) {
-            Spacer(Modifier.height(24.dp))
+            Spacer(Modifier.height(Spacing.xl))
             Button(onClick = onAction) { Text(action) }
         }
     }
@@ -389,14 +389,14 @@ private fun Pulse(modifier: Modifier) {
 fun PermissionScreen(askedBefore: Boolean, onRequest: () -> Unit, onOpenSettings: () -> Unit) {
     Scaffold { padding ->
         Column(
-            Modifier.padding(padding).fillMaxSize().padding(32.dp),
+            Modifier.padding(padding).fillMaxSize().padding(Spacing.xxl),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
         ) {
             IconBadge(Icons.Default.Bluetooth, size = 88.dp, iconSize = 40.dp)
-            Spacer(Modifier.height(24.dp))
+            Spacer(Modifier.height(Spacing.xl))
             Text("Find your devices", style = MaterialTheme.typography.headlineSmall, textAlign = TextAlign.Center)
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(Spacing.s))
             Text(
                 "Boks Remote controls SOUNDBOKS speakers and the Lightboks over Bluetooth. Allow Nearby devices so it can find them. " +
                     "No account or location access is needed.",
@@ -404,10 +404,10 @@ fun PermissionScreen(askedBefore: Boolean, onRequest: () -> Unit, onOpenSettings
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
             )
-            Spacer(Modifier.height(24.dp))
+            Spacer(Modifier.height(Spacing.xl))
             Button(onClick = onRequest) { Text("Allow Nearby devices") }
             if (askedBefore) {
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(Spacing.s))
                 TextButton(onClick = onOpenSettings) { Text("Open app settings") }
             }
         }

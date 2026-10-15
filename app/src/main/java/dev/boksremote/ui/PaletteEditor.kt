@@ -8,21 +8,14 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
-import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.minimumInteractiveComponentSize
-import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.layout.layout
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextAlign
 import kotlin.math.roundToInt
@@ -69,7 +62,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -179,7 +171,7 @@ fun PaletteEditorPage(
         onDismiss = ::close,
         top = {
             IconButton(onClick = ::close) { Icon(Icons.Default.Close, contentDescription = "Close") }
-            Text(if (draft.original == null) "New palette" else "Edit palette", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(start = 4.dp))
+            Text(if (draft.original == null) "New palette" else "Edit palette", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(start = Spacing.xs))
         },
     ) {
         // The page's own window's, not the screen's beneath it, or clearing focus misses the name field.
@@ -199,10 +191,10 @@ fun PaletteEditorPage(
                         }
                     }
                     // Room at the end for the dock, so it never covers the last controls.
-                    .padding(start = 24.dp, end = 24.dp, bottom = 112.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
+                    .padding(start = Spacing.xl, end = Spacing.xl, bottom = 112.dp),
+                verticalArrangement = Arrangement.spacedBy(Spacing.m),
             ) {
-                Spacer(Modifier.height(4.dp))
+                Spacer(Modifier.height(Spacing.xs))
                 Stage(
                     colors = snapshot,
                     selected = selected,
@@ -214,12 +206,12 @@ fun PaletteEditorPage(
                         if (!on) { onPreviewOff(); lastSent = null }
                     },
                 )
-                Spacer(Modifier.height(4.dp))
+                Spacer(Modifier.height(Spacing.xs))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(SWATCH_LABELS[selected], style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
                     TextButton(onClick = { editingHex = true }, contentPadding = PaddingValues(horizontal = 12.dp)) {
                         Text(color.hex(), style = MaterialTheme.typography.labelLarge.copy(fontFeatureSettings = "tnum"))
-                        Spacer(Modifier.width(6.dp))
+                        Spacer(Modifier.width(Spacing.s))
                         Icon(Icons.Default.Edit, contentDescription = "Edit colour code", modifier = Modifier.size(16.dp))
                     }
                 }
@@ -227,14 +219,14 @@ fun PaletteEditorPage(
                 if (recents.isNotEmpty()) {
                     ControlLabel("Recent colours")
                     // Newest first; the one the swatch has now is ringed.
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.horizontalScroll(rememberScrollState())) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(Spacing.s), modifier = Modifier.horizontalScroll(rememberScrollState())) {
                         recents.forEach { c ->
                             val current = c.hex() == color.hex()
                             Box(
                                 Modifier
                                     .size(36.dp)
                                     .border(2.dp, if (current) MaterialTheme.colorScheme.primary else Color.Transparent, CircleShape)
-                                    .padding(4.dp)
+                                    .padding(Spacing.xs)
                                     .clip(CircleShape)
                                     .background(c.compose())
                                     .border(1.dp, MaterialTheme.colorScheme.outlineVariant, CircleShape)
@@ -243,7 +235,7 @@ fun PaletteEditorPage(
                         }
                     }
                 }
-                Spacer(Modifier.height(12.dp))
+                Spacer(Modifier.height(Spacing.m))
                 Starters(
                     base = color,
                     baseLabel = SWATCH_LABELS[selected],
@@ -260,7 +252,7 @@ fun PaletteEditorPage(
             Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth()) {
                 // Controls fade out above the dock instead of being cut by it.
                 Box(Modifier.fillMaxWidth().height(24.dp).background(Brush.verticalGradient(listOf(Color.Transparent, MaterialTheme.colorScheme.surface))))
-                Box(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).navigationBarsPadding().imePadding().padding(start = 16.dp, end = 16.dp, bottom = 12.dp)) {
+                Box(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).navigationBarsPadding().imePadding().padding(start = Spacing.l, end = Spacing.l, bottom = Spacing.m)) {
                     Dock(
                         name = name,
                         onNameChange = { name = it.take(PaletteCodec.MAX_NAME) },
@@ -318,9 +310,9 @@ private fun Dock(name: String, onNameChange: (String) -> Unit, onSave: () -> Uni
         color = scheme.surfaceContainerHighest,
         border = BorderStroke(1.dp, if (focused) scheme.primary else Color.Transparent),
     ) {
-        Row(Modifier.fillMaxWidth().height(DOCK_HEIGHT).padding(start = 20.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth().height(DOCK_HEIGHT).padding(start = Spacing.l, end = Spacing.s), verticalAlignment = Alignment.CenterVertically) {
             Icon(Icons.Default.Edit, contentDescription = null, tint = scheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
-            Spacer(Modifier.width(12.dp))
+            Spacer(Modifier.width(Spacing.m))
             BasicTextField(
                 value = name,
                 onValueChange = onNameChange,
@@ -338,7 +330,7 @@ private fun Dock(name: String, onNameChange: (String) -> Unit, onSave: () -> Uni
                     }
                 },
             )
-            Spacer(Modifier.width(8.dp))
+            Spacer(Modifier.width(Spacing.s))
             Button(onClick = onSave, contentPadding = PaddingValues(horizontal = 24.dp), modifier = Modifier.height(DOCK_BUTTON_HEIGHT)) { Text("Save") }
         }
     }
@@ -359,9 +351,9 @@ private fun Starters(base: HsvColor, baseLabel: String, onHarmony: (Harmony) -> 
         }
     }
     ControlLabel("Generate from $baseLabel")
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(Spacing.s)) {
         Harmony.entries.chunked(HARMONY_COLUMNS).forEach { row ->
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(Spacing.s)) {
                 row.forEach { h -> HarmonyTile(h.label, h.from(base), Modifier.weight(1f)) { onHarmony(h) } }
             }
         }
@@ -384,16 +376,16 @@ private const val HARMONY_COLUMNS = 3
 private fun HarmonyTile(label: String, colors: List<HsvColor>, modifier: Modifier, onClick: () -> Unit) {
     Column(
         modifier
-            .clip(RoundedCornerShape(12.dp))
-            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+            .clip(RoundedCornerShape(Corners.medium))
+            .background(cardContainer)
             .clickable(onClickLabel = "Use $label", onClick = onClick)
-            .padding(8.dp),
+            .padding(Spacing.s),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Row(Modifier.fillMaxWidth().height(24.dp).clip(RoundedCornerShape(6.dp)).clearAndSetSemantics {}) {
+        Row(Modifier.fillMaxWidth().height(24.dp).clip(RoundedCornerShape(Corners.small)).clearAndSetSemantics {}) {
             colors.forEach { c -> Box(Modifier.weight(1f).fillMaxHeight().background(c.compose())) }
         }
-        Spacer(Modifier.height(6.dp))
+        Spacer(Modifier.height(Spacing.s))
         Text(label, style = MaterialTheme.typography.labelLarge, maxLines = 1)
     }
 }
@@ -430,8 +422,8 @@ private fun Stage(colors: List<HsvColor>, selected: Int, onSelect: (Int) -> Unit
     Column {
         Box {
             Box(Modifier.padding(bottom = SWATCH_SELECTED_SIZE / 2)) {
-                PaletteArt(colors, Modifier.fillMaxWidth().aspectRatio(2.1f).clip(RoundedCornerShape(20.dp)))
-                LivePill(preview, onPreviewChange, Modifier.align(Alignment.TopStart).padding(8.dp))
+                PaletteArt(colors, Modifier.fillMaxWidth().aspectRatio(2.1f).clip(RoundedCornerShape(Corners.large)))
+                LivePill(preview, onPreviewChange, Modifier.align(Alignment.TopStart).padding(Spacing.s))
             }
             Row(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(SWATCH_SELECTED_SIZE), verticalAlignment = Alignment.CenterVertically) {
                 colors.forEachIndexed { i, c ->
@@ -447,7 +439,7 @@ private fun Stage(colors: List<HsvColor>, selected: Int, onSelect: (Int) -> Unit
                                 .padding(if (isSelected) 5.dp else 0.dp)
                                 .clip(CircleShape)
                                 .background(c.compose())
-                                .border(1.dp, Color.White.copy(alpha = 0.18f), CircleShape)
+                                .border(1.dp, OnArt.hairline, CircleShape)
                                 .clickable(onClickLabel = "Edit ${SWATCH_LABELS[i]}") { onSelect(i) }
                                 .semantics { this.selected = isSelected; contentDescription = SWATCH_LABELS[i] },
                         )
@@ -478,22 +470,22 @@ private fun LivePill(on: Boolean, onChange: (Boolean) -> Unit, modifier: Modifie
         modifier
             .minimumInteractiveComponentSize()
             .clip(CircleShape)
-            .background(Color.Black.copy(alpha = 0.55f))
+            .background(Scrim.chip)
             .toggleable(value = on, role = Role.Switch, onValueChange = onChange)
-            .padding(start = 10.dp, end = 12.dp, top = 6.dp, bottom = 6.dp),
+            .padding(start = Spacing.s, end = Spacing.m, top = Spacing.s, bottom = Spacing.s),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(
             Modifier
                 .size(8.dp)
                 .background(if (on) Color.White else Color.Transparent, CircleShape)
-                .border(1.5.dp, Color.White.copy(alpha = if (on) 1f else 0.7f), CircleShape),
+                .border(1.5.dp, if (on) OnArt.text else OnArt.subtle, CircleShape),
         )
-        Spacer(Modifier.width(8.dp))
+        Spacer(Modifier.width(Spacing.s))
         Text(
             if (on) "Live on the light" else "Preview off",
             style = MaterialTheme.typography.labelLarge,
-            color = Color.White.copy(alpha = if (on) 1f else 0.8f),
+            color = if (on) OnArt.text else OnArt.subtle,
         )
     }
 }
@@ -523,61 +515,27 @@ private fun ColorPicker(color: HsvColor, onChange: (HsvColor) -> Unit, onSettled
     }
 }
 
-private val TRACK_HEIGHT = 24.dp
-private val THUMB_SIZE = 30.dp
-
 /**
  * A slider drawn over the colour range it picks from, with a thumb filled with the colour being made.
  * The gradient runs between the thumb's two end positions, so the colour under the thumb is the one it picks.
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun GradientSlider(label: String, reading: String, value: Float, stops: List<Color>, color: HsvColor, onSettled: () -> Unit, onChange: (Float) -> Unit) {
-    val outline = MaterialTheme.colorScheme.outlineVariant
-    val drag = remember { MutableInteractionSource() }
-    val dragged by drag.collectIsDraggedAsState()
-    val pressed by drag.collectIsPressedAsState()
-    val grow by animateFloatAsState(if (dragged || pressed) 1.15f else 1f, label = "thumb")
     Row(verticalAlignment = Alignment.Bottom) {
         Text(label, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
         Text(reading, style = MaterialTheme.typography.labelLarge.copy(fontFeatureSettings = "tnum"), color = MaterialTheme.colorScheme.onSurface)
     }
-    Slider(
-        value = value,
-        onValueChange = onChange,
-        onValueChangeFinished = onSettled,
-        interactionSource = drag,
-        modifier = Modifier.semantics { contentDescription = label },
-        thumb = {
-            Box(
-                Modifier
-                    .size(THUMB_SIZE)
-                    .graphicsLayer { scaleX = grow; scaleY = grow }
-                    .shadow(3.dp, CircleShape)
-                    .background(Color.White, CircleShape)
-                    .padding(3.dp)
-                    .background(color.compose(), CircleShape),
-            )
-        },
-        track = {
-            Box(
-                Modifier
-                    // The slider spans its track between the thumb's centres; this one reaches out to the thumb's edges.
-                    .layout { measurable, constraints ->
-                        val reach = (THUMB_SIZE / 2).roundToPx()
-                        val p = measurable.measure(constraints.copy(minWidth = constraints.maxWidth + 2 * reach, maxWidth = constraints.maxWidth + 2 * reach))
-                        layout(constraints.maxWidth, p.height) { p.place(-reach, 0) }
-                    }
-                    .height(TRACK_HEIGHT)
-                    .clip(CircleShape)
-                    .drawBehind {
-                        val inset = THUMB_SIZE.toPx() / 2
-                        drawRect(Brush.horizontalGradient(stops, startX = inset, endX = size.width - inset))
-                    }
-                    .border(1.dp, outline, CircleShape),
-            )
-        },
-    )
+    ColorTrackSlider(
+        value,
+        onChange,
+        onSettled,
+        thumbColor = color.compose(),
+        description = label,
+        trackHeight = 24.dp,
+        thumbSize = 30.dp,
+        outline = MaterialTheme.colorScheme.outlineVariant,
+        growWhenHeld = true,
+    ) { inset -> drawRect(Brush.horizontalGradient(stops, startX = inset, endX = size.width - inset)) }
 }
 
 @Composable
@@ -590,7 +548,7 @@ private fun HexDialog(initial: String, onDismiss: () -> Unit, onConfirm: (HsvCol
         text = {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.size(40.dp).clip(CircleShape).background(parsed?.compose() ?: Color.Transparent).border(1.dp, MaterialTheme.colorScheme.outlineVariant, CircleShape))
-                Spacer(Modifier.width(12.dp))
+                Spacer(Modifier.width(Spacing.m))
                 OutlinedTextField(
                     value = text,
                     onValueChange = { text = it.take(7) },

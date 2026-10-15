@@ -1,15 +1,8 @@
 package dev.boksremote.ui
 
 import android.Manifest
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.MutableTransitionState
-import androidx.compose.animation.slideInVertically
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.IconButton
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -86,6 +79,7 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import dev.boksremote.speaker.PaletteCodec
 import dev.boksremote.audio.BandModel
 import dev.boksremote.audio.BandResponse
 import dev.boksremote.audio.MeasurementException
@@ -268,179 +262,174 @@ internal fun RoomCorrectionWizard(
     val previous = TuneStep.entries.getOrNull(step.ordinal - 1)
     fun back() = if (previous != null && step != TuneStep.RESULT && !measuring) go(previous) else onDismiss()
 
-    // A full-screen window of its own over the device screen, with the step's actions pinned to the bottom.
-    Dialog(
-        onDismissRequest = ::back,
-        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false, dismissOnClickOutside = false),
+    // A full-screen page of its own over the device screen, with the step's actions pinned to the bottom.
+    FullScreenPage(
+        onDismiss = onDismiss,
+        onBack = ::back,
+        top = { close ->
+            IconButton(onClick = close) { Icon(Icons.Default.Close, contentDescription = "Close") }
+            Text("Tune to this room", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(start = Spacing.xs))
+        },
     ) {
-        val shown = remember { MutableTransitionState(false).apply { targetState = true } }
-        AnimatedVisibility(shown, enter = slideInVertically { it / 12 } + fadeIn()) {
-            Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
-                Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()) {
-                    Row(Modifier.fillMaxWidth().height(64.dp).padding(start = 4.dp, end = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-                        IconButton(onClick = onDismiss) { Icon(Icons.Default.Close, contentDescription = "Close") }
-                        Text("Tune to this room", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(start = 4.dp))
-                    }
-                    Column(
-                        Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        Spacer(Modifier.height(4.dp))
-                        StepIndicator(step)
+        Column(Modifier.weight(1f).navigationBarsPadding()) {
+            Column(
+                Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = Spacing.xl),
+                verticalArrangement = Arrangement.spacedBy(Spacing.m),
+            ) {
+                Spacer(Modifier.height(Spacing.xs))
+                StepIndicator(step)
 
-                        AnimatedContent(
-                            targetState = step,
-                            transitionSpec = {
-                                val dir = if (targetState > initialState) 1 else -1
-                                (slideInHorizontally { it / 4 * dir } + fadeIn()) togetherWith (slideOutHorizontally { -it / 4 * dir } + fadeOut())
-                            },
-                            label = "tune step",
-                        ) { page ->
-                            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                                when (page) {
-                                    TuneStep.INTRO -> {
-                                        Body("Your phone listens to a few test tones and suggests an EQ that fits your room.")
-                                        Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                                            Instruction(Icons.Default.Speaker, "Up close")
-                                            Instruction(Icons.Default.Hearing, "Where you listen")
-                                            Instruction(Icons.Default.Equalizer, "Hear & save")
-                                        }
-                                        HintText("About two minutes. Your current EQ comes back if you stop.")
-                                        if (!bandModel.measured) ApproximateNote("The suggestion is approximate on this speaker: its EQ bands haven't been measured yet, so the app uses the Mix's.")
-                                    }
-                                    TuneStep.GOAL -> {
-                                        ControlLabel("Where is the speaker?")
-                                        OptionCard(place == Place.INDOORS, Icons.Default.Home, "Indoors", "Walls and corners pile up bass at some spots and cancel it at others. The EQ mostly cuts the peaks.") { place = Place.INDOORS }
-                                        OptionCard(place == Place.OUTDOORS, Icons.Default.Park, "Outdoors", "No walls to help the bass along, so it thins out with distance. The EQ may lift it a bit more.") { place = Place.OUTDOORS }
-                                        Spacer(Modifier.height(4.dp))
-                                        ControlLabel("How should it sound?")
-                                        SoundGoal.entries.forEach { goal ->
-                                            OptionCard(sound == goal, goal.icon, goal.label, goal.description) { sound = goal }
-                                        }
-                                        HintText("Whatever you pick, the room's own peaks and dips are still evened out. You can switch the sound on the result page without measuring again.")
-                                    }
-                                    TuneStep.SETUP -> {
-                                        Body("A few things before the test tones start.")
-                                        CheckItem(
-                                            done = hasMic,
-                                            icon = Icons.Default.Mic,
-                                            title = "Microphone access",
-                                            text = "The phone listens while the speaker plays.",
-                                            action = if (hasMic) null else ("Allow" to { micLauncher.launch(Manifest.permission.RECORD_AUDIO) }),
-                                        )
-                                        CheckItem(
-                                            done = bluetooth,
-                                            icon = Icons.Default.Bluetooth,
-                                            title = "Phone audio plays on ${shownName(s.name) ?: "the speaker"}",
-                                            text = when {
-                                                bluetooth -> "Connected over Bluetooth."
-                                                externalMics.isNotEmpty() -> "The tones come from the phone, so connect it to the speaker over Bluetooth for audio. If your microphone has a headphone output, the phone may be playing there instead."
-                                                else -> "The tones come from the phone, so connect it to the speaker over Bluetooth for audio."
-                                            },
-                                        )
-                                        CheckItem(done = null, icon = Icons.AutoMirrored.Filled.VolumeUp, title = "Your usual volume", text = "Set the volume you normally listen at; the EQ is tuned for that level.")
-                                        CheckItem(done = null, icon = Icons.AutoMirrored.Filled.VolumeOff, title = "A quiet room", text = "Pause other music and ask people to keep talking down for a minute.")
-                                        Spacer(Modifier.height(4.dp))
-                                        ControlLabel("Measure with")
-                                        if (externalMics.isEmpty()) {
-                                            HintText("The phone's microphone works fine. For a more accurate result, especially in the deep bass, plug in a USB measurement microphone and it shows up here.")
-                                        } else {
-                                            OptionCard(mic == null, Icons.Default.Smartphone, "Phone microphone", "Built in. Fine for most rooms.") { chooseMic(null) }
-                                            externalMics.forEach { m ->
-                                                OptionCard(mic?.id == m.id, Icons.Default.SettingsVoice, m.productName.toString().ifBlank { "External microphone" }, "Hears the deep bass and high treble more accurately, so the EQ covers 40 Hz to 16 kHz.") { chooseMic(m.id) }
-                                            }
-                                        }
-                                    }
-                                    TuneStep.REFERENCE -> {
-                                        if (mic != null) {
-                                            Body("Hold the microphone about 50 cm in front of the speaker, at the height of its centre, pointing at it. Keep still until the tones stop, and point it the same way at every spot.")
-                                        } else {
-                                            Body("Hold the phone about 50 cm in front of the speaker, at the height of its centre, with the microphone towards it. Keep still until the tones stop.")
-                                        }
-                                        HintText("A few rising tones play, from deep bass to high treble. If the first ones are too loud for the microphone, the speaker turns down and plays them again.")
-                                        if (reference != null && !measuring) Done("Measured. Measure again if something disturbed it.")
-                                        TurnedDown(measureVolume, userVolume)
-                                    }
-                                    TuneStep.SPOTS -> {
-                                        if (place == Place.OUTDOORS) {
-                                            Body("Now stand where the crowd will be, a few metres out in front, and hold the phone at ear height.")
-                                            HintText("Bass changes most with distance outdoors. Measuring 2 or 3 spots, near and further back, gives a steadier result. Shield the phone from wind.")
-                                        } else {
-                                            Body("Now stand where people will be, like the sofa or the middle of the dance floor, and hold the phone at ear height.")
-                                            HintText("Each spot hears the room a little differently. Measuring 2 or 3 spots, a metre or more apart, gives a steadier result.")
-                                        }
-                                        if (mic != null) HintText("Hold the microphone at ear height, pointing at the speaker like before.")
-                                        SpotProgress(spots.size, measuring)
-                                        TurnedDown(measureVolume, userVolume)
-                                    }
-                                    TuneStep.RESULT -> result?.let { r ->
-                                        Choice(SoundGoal.entries, sound, { it.label }) { if (it != sound) { sound = it; fit() } }
-                                        val aim = if (sound == SoundGoal.BALANCED) "an even sound" else sound.label.lowercase()
-                                        if (RoomCorrection.isNegligible(r)) {
-                                            Body("The sound at your spots is already within about ±${r.beforeRmsDb.roundToInt()} dB of $aim. A correction wouldn't make an audible difference, so there's nothing to change.")
-                                        } else {
-                                            Body("At the spots you measured, the sound is about ±${"%.1f".format(r.beforeRmsDb)} dB away from $aim. With this EQ that drops to about ±${"%.1f".format(r.afterRmsDb)} dB.")
-                                        }
-                                        RoomPlot(r, shapes)
-                                        PlotLegend(showTarget = sound != SoundGoal.BALANCED)
-                                        if (!bandModel.measured) ApproximateNote("\"With EQ\" is estimated from the Mix's bands, so this speaker may land a little differently. Listen before you save.")
-                                        EqGraph(r.bands, onChange = null)
-                                        OutlinedButton(onClick = {
-                                            hearingCorrection = !hearingCorrection
-                                            speaker.setCustomEq(if (hearingCorrection) r.bands else EqCurve.FLAT)
-                                        }, modifier = Modifier.fillMaxWidth()) {
-                                            Text(if (hearingCorrection) "Playing with EQ · tap to hear without" else "Playing without EQ · tap to hear with")
-                                        }
+                AnimatedContent(
+                    targetState = step,
+                    transitionSpec = {
+                        val dir = if (targetState > initialState) 1 else -1
+                        (slideInHorizontally { it / 4 * dir } + fadeIn()) togetherWith (slideOutHorizontally { -it / 4 * dir } + fadeOut())
+                    },
+                    label = "tune step",
+                ) { page ->
+                    Column(verticalArrangement = Arrangement.spacedBy(Spacing.m)) {
+                        when (page) {
+                            TuneStep.INTRO -> {
+                                Body("Your phone listens to a few test tones and suggests an EQ that fits your room.")
+                                Row(Modifier.fillMaxWidth().padding(vertical = Spacing.s), horizontalArrangement = Arrangement.spacedBy(Spacing.m)) {
+                                    Instruction(Icons.Default.Speaker, "Up close")
+                                    Instruction(Icons.Default.Hearing, "Where you listen")
+                                    Instruction(Icons.Default.Equalizer, "Hear & save")
+                                }
+                                HintText("About two minutes. Your current EQ comes back if you stop.")
+                                if (!bandModel.measured) ApproximateNote("The suggestion is approximate on this speaker: its EQ bands haven't been measured yet, so the app uses the Mix's.")
+                            }
+                            TuneStep.GOAL -> {
+                                ControlLabel("Where is the speaker?")
+                                OptionCard(place == Place.INDOORS, Icons.Default.Home, "Indoors", "Walls and corners pile up bass at some spots and cancel it at others. The EQ mostly cuts the peaks.") { place = Place.INDOORS }
+                                OptionCard(place == Place.OUTDOORS, Icons.Default.Park, "Outdoors", "No walls to help the bass along, so it thins out with distance. The EQ may lift it a bit more.") { place = Place.OUTDOORS }
+                                Spacer(Modifier.height(Spacing.xs))
+                                ControlLabel("How should it sound?")
+                                SoundGoal.entries.forEach { goal ->
+                                    OptionCard(sound == goal, goal.icon, goal.label, goal.description) { sound = goal }
+                                }
+                                HintText("Whatever you pick, the room's own peaks and dips are still evened out. You can switch the sound on the result page without measuring again.")
+                            }
+                            TuneStep.SETUP -> {
+                                Body("A few things before the test tones start.")
+                                CheckItem(
+                                    done = hasMic,
+                                    icon = Icons.Default.Mic,
+                                    title = "Microphone access",
+                                    text = "The phone listens while the speaker plays.",
+                                    action = if (hasMic) null else ("Allow" to { micLauncher.launch(Manifest.permission.RECORD_AUDIO) }),
+                                )
+                                CheckItem(
+                                    done = bluetooth,
+                                    icon = Icons.Default.Bluetooth,
+                                    title = "Phone audio plays on ${shownName(s.name) ?: "the speaker"}",
+                                    text = when {
+                                        bluetooth -> "Connected over Bluetooth."
+                                        externalMics.isNotEmpty() -> "The tones come from the phone, so connect it to the speaker over Bluetooth for audio. If your microphone has a headphone output, the phone may be playing there instead."
+                                        else -> "The tones come from the phone, so connect it to the speaker over Bluetooth for audio."
+                                    },
+                                )
+                                CheckItem(done = null, icon = Icons.AutoMirrored.Filled.VolumeUp, title = "Your usual volume", text = "Set the volume you normally listen at; the EQ is tuned for that level.")
+                                CheckItem(done = null, icon = Icons.AutoMirrored.Filled.VolumeOff, title = "A quiet room", text = "Pause other music and ask people to keep talking down for a minute.")
+                                Spacer(Modifier.height(Spacing.xs))
+                                ControlLabel("Measure with")
+                                if (externalMics.isEmpty()) {
+                                    HintText("The phone's microphone works fine. For a more accurate result, especially in the deep bass, plug in a USB measurement microphone and it shows up here.")
+                                } else {
+                                    OptionCard(mic == null, Icons.Default.Smartphone, "Phone microphone", "Built in. Fine for most rooms.") { chooseMic(null) }
+                                    externalMics.forEach { m ->
+                                        OptionCard(mic?.id == m.id, Icons.Default.SettingsVoice, m.productName.toString().ifBlank { "External microphone" }, "Hears the deep bass and high treble more accurately, so the EQ covers 40 Hz to 16 kHz.") { chooseMic(m.id) }
                                     }
                                 }
                             }
-                        }
-
-                        if (measuring) LinearProgressIndicator(Modifier.fillMaxWidth())
-                        error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium) }
-                        Spacer(Modifier.height(12.dp))
-                    }
-
-                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 12.dp)) {
-                        when {
-                            step == TuneStep.RESULT -> TextButton(onClick = { reference = null; spots = emptyList(); measureVolume = null; go(TuneStep.REFERENCE) }) { Text("Measure again") }
-                            previous != null -> TextButton(onClick = { go(previous) }, enabled = !measuring) { Text("Back") }
-                            else -> TextButton(onClick = onDismiss) { Text("Cancel") }
-                        }
-                        Spacer(Modifier.weight(1f))
-                        when (step) {
-                            TuneStep.INTRO -> Button(onClick = { go(TuneStep.GOAL) }) { Text("Start") }
-                            TuneStep.GOAL -> Button(onClick = { go(TuneStep.SETUP) }) { Text("Next") }
-                            TuneStep.SETUP -> Button(onClick = { go(TuneStep.REFERENCE) }, enabled = hasMic && bluetooth) { Text("Next") }
-                            TuneStep.REFERENCE -> if (reference == null || measuring) {
-                                MeasureButton(measuring, "Measure") { measure(isReference = true) { reference = it; go(TuneStep.SPOTS) } }
-                            } else {
-                                OutlinedButton(onClick = { measure(isReference = true) { reference = it } }) { Text("Redo") }
-                                Spacer(Modifier.width(8.dp))
-                                Button(onClick = { go(TuneStep.SPOTS) }) { Text("Next") }
+                            TuneStep.REFERENCE -> {
+                                if (mic != null) {
+                                    Body("Hold the microphone about 50 cm in front of the speaker, at the height of its centre, pointing at it. Keep still until the tones stop, and point it the same way at every spot.")
+                                } else {
+                                    Body("Hold the phone about 50 cm in front of the speaker, at the height of its centre, with the microphone towards it. Keep still until the tones stop.")
+                                }
+                                HintText("A few rising tones play, from deep bass to high treble. If the first ones are too loud for the microphone, the speaker turns down and plays them again.")
+                                if (reference != null && !measuring) Done("Measured. Measure again if something disturbed it.")
+                                TurnedDown(measureVolume, userVolume)
                             }
                             TuneStep.SPOTS -> {
-                                if (spots.size < MAX_SPOTS) {
-                                    val label = if (spots.isEmpty()) "Measure" else "Spot ${spots.size + 1}"
-                                    if (spots.isEmpty() || measuring) {
-                                        MeasureButton(measuring, label) { measure(isReference = false) { spots = spots + it } }
-                                    } else {
-                                        OutlinedButton(onClick = { measure(isReference = false) { spots = spots + it } }) { Text(label) }
-                                    }
-                                }
-                                if (spots.isNotEmpty() && !measuring) {
-                                    Spacer(Modifier.width(8.dp))
-                                    Button(onClick = ::showResult) { Text("See result") }
-                                }
-                            }
-                            TuneStep.RESULT -> {
-                                val r = result
-                                if (r == null || RoomCorrection.isNegligible(r)) {
-                                    Button(onClick = onDismiss) { Text("Done") }
+                                if (place == Place.OUTDOORS) {
+                                    Body("Now stand where the crowd will be, a few metres out in front, and hold the phone at ear height.")
+                                    HintText("Bass changes most with distance outdoors. Measuring 2 or 3 spots, near and further back, gives a steadier result. Shield the phone from wind.")
                                 } else {
-                                    Button(onClick = { naming = true }) { Text("Save as preset") }
+                                    Body("Now stand where people will be, like the sofa or the middle of the dance floor, and hold the phone at ear height.")
+                                    HintText("Each spot hears the room a little differently. Measuring 2 or 3 spots, a metre or more apart, gives a steadier result.")
+                                }
+                                if (mic != null) HintText("Hold the microphone at ear height, pointing at the speaker like before.")
+                                SpotProgress(spots.size, measuring)
+                                TurnedDown(measureVolume, userVolume)
+                            }
+                            TuneStep.RESULT -> result?.let { r ->
+                                Choice(SoundGoal.entries, sound, { it.label }) { if (it != sound) { sound = it; fit() } }
+                                val aim = if (sound == SoundGoal.BALANCED) "an even sound" else sound.label.lowercase()
+                                if (RoomCorrection.isNegligible(r)) {
+                                    Body("The sound at your spots is already within about ±${r.beforeRmsDb.roundToInt()} dB of $aim. A correction wouldn't make an audible difference, so there's nothing to change.")
+                                } else {
+                                    Body("At the spots you measured, the sound is about ±${"%.1f".format(r.beforeRmsDb)} dB away from $aim. With this EQ that drops to about ±${"%.1f".format(r.afterRmsDb)} dB.")
+                                }
+                                RoomPlot(r, shapes)
+                                PlotLegend(showTarget = sound != SoundGoal.BALANCED)
+                                if (!bandModel.measured) ApproximateNote("\"With EQ\" is estimated from the Mix's bands, so this speaker may land a little differently. Listen before you save.")
+                                EqGraph(r.bands, onChange = null)
+                                OutlinedButton(onClick = {
+                                    hearingCorrection = !hearingCorrection
+                                    speaker.setCustomEq(if (hearingCorrection) r.bands else EqCurve.FLAT)
+                                }, modifier = Modifier.fillMaxWidth()) {
+                                    Text(if (hearingCorrection) "Playing with EQ · tap to hear without" else "Playing without EQ · tap to hear with")
                                 }
                             }
+                        }
+                    }
+                }
+
+                if (measuring) LinearProgressIndicator(Modifier.fillMaxWidth())
+                error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium) }
+                Spacer(Modifier.height(Spacing.m))
+            }
+
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(horizontal = Spacing.xl, vertical = Spacing.m)) {
+                when {
+                    step == TuneStep.RESULT -> TextButton(onClick = { reference = null; spots = emptyList(); measureVolume = null; go(TuneStep.REFERENCE) }) { Text("Measure again") }
+                    previous != null -> TextButton(onClick = { go(previous) }, enabled = !measuring) { Text("Back") }
+                    else -> TextButton(onClick = onDismiss) { Text("Cancel") }
+                }
+                Spacer(Modifier.weight(1f))
+                when (step) {
+                    TuneStep.INTRO -> Button(onClick = { go(TuneStep.GOAL) }) { Text("Start") }
+                    TuneStep.GOAL -> Button(onClick = { go(TuneStep.SETUP) }) { Text("Next") }
+                    TuneStep.SETUP -> Button(onClick = { go(TuneStep.REFERENCE) }, enabled = hasMic && bluetooth) { Text("Next") }
+                    TuneStep.REFERENCE -> if (reference == null || measuring) {
+                        MeasureButton(measuring, "Measure") { measure(isReference = true) { reference = it; go(TuneStep.SPOTS) } }
+                    } else {
+                        OutlinedButton(onClick = { measure(isReference = true) { reference = it } }) { Text("Redo") }
+                        Spacer(Modifier.width(Spacing.s))
+                        Button(onClick = { go(TuneStep.SPOTS) }) { Text("Next") }
+                    }
+                    TuneStep.SPOTS -> {
+                        if (spots.size < MAX_SPOTS) {
+                            val label = if (spots.isEmpty()) "Measure" else "Spot ${spots.size + 1}"
+                            if (spots.isEmpty() || measuring) {
+                                MeasureButton(measuring, label) { measure(isReference = false) { spots = spots + it } }
+                            } else {
+                                OutlinedButton(onClick = { measure(isReference = false) { spots = spots + it } }) { Text(label) }
+                            }
+                        }
+                        if (spots.isNotEmpty() && !measuring) {
+                            Spacer(Modifier.width(Spacing.s))
+                            Button(onClick = ::showResult) { Text("See result") }
+                        }
+                    }
+                    TuneStep.RESULT -> {
+                        val r = result
+                        if (r == null || RoomCorrection.isNegligible(r)) {
+                            Button(onClick = onDismiss) { Text("Done") }
+                        } else {
+                            Button(onClick = { naming = true }) { Text("Save as preset") }
                         }
                     }
                 }
@@ -450,7 +439,7 @@ internal fun RoomCorrectionWizard(
 
     if (naming) {
         val initial = if (sound == SoundGoal.BALANCED) "Room" else "Room · ${sound.label}"
-        PaletteNameDialog("Name your custom EQ", initial = initial, confirm = "Save", placeholder = "My EQ", onDismiss = { naming = false }) { name ->
+        NameDialog("Name your custom EQ", initial = initial, confirm = "Save", maxLength = PaletteCodec.MAX_NAME, placeholder = "My EQ", onDismiss = { naming = false }) { name ->
             result?.let { store.add(name, it.bands); speaker.setCustomEq(it.bands) }
             kept = true
             naming = false
@@ -463,8 +452,8 @@ internal fun RoomCorrectionWizard(
 @Composable
 private fun StepIndicator(step: TuneStep) {
     val colors = MaterialTheme.colorScheme
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(Spacing.s)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(Spacing.xs)) {
             TuneStep.entries.forEach {
                 val color by animateColorAsState(if (it <= step) colors.primary else colors.surfaceContainerHighest, label = "step segment")
                 Box(Modifier.weight(1f).height(4.dp).background(color, RoundedCornerShape(2.dp)))
@@ -484,7 +473,7 @@ private fun Body(text: String) = Text(text, style = MaterialTheme.typography.bod
 /** One of the intro's three steps: an icon over a short label, sharing the row equally. */
 @Composable
 private fun RowScope.Instruction(icon: ImageVector, text: String) {
-    Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(Spacing.s)) {
         IconBadge(icon)
         Text(text, style = MaterialTheme.typography.labelLarge, textAlign = TextAlign.Center)
     }
@@ -497,7 +486,7 @@ private fun RowScope.Instruction(icon: ImageVector, text: String) {
 @Composable
 private fun CheckItem(done: Boolean?, icon: ImageVector, title: String, text: String, action: Pair<String, () -> Unit>? = null) {
     val colors = MaterialTheme.colorScheme
-    Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(horizontalArrangement = Arrangement.spacedBy(Spacing.m), verticalAlignment = Alignment.CenterVertically) {
         when (done) {
             true -> Icon(Icons.Default.CheckCircle, contentDescription = "Done", tint = colors.primary, modifier = Modifier.size(24.dp))
             false -> Icon(Icons.Default.RadioButtonUnchecked, contentDescription = "Not done", tint = colors.error, modifier = Modifier.size(24.dp))
@@ -536,12 +525,12 @@ private fun OptionCard(selected: Boolean, icon: ImageVector, title: String, text
     Surface(
         selected = selected,
         onClick = onClick,
-        shape = RoundedCornerShape(12.dp),
-        color = if (selected) colors.secondaryContainer else colors.surfaceContainerLow,
+        shape = RoundedCornerShape(Corners.medium),
+        color = if (selected) colors.secondaryContainer else cardContainer,
         border = BorderStroke(1.dp, if (selected) colors.primary else colors.outlineVariant),
         modifier = Modifier.fillMaxWidth(),
     ) {
-        Row(Modifier.padding(12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.padding(Spacing.m), horizontalArrangement = Arrangement.spacedBy(Spacing.m), verticalAlignment = Alignment.CenterVertically) {
             Icon(icon, contentDescription = null, tint = if (selected) colors.primary else colors.onSurfaceVariant)
             Column(Modifier.weight(1f)) {
                 Text(title, style = MaterialTheme.typography.bodyLarge)
@@ -560,7 +549,7 @@ private fun TurnedDown(measureVolume: Int?, userVolume: Int?) {
 
 @Composable
 private fun Done(text: String) {
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(horizontalArrangement = Arrangement.spacedBy(Spacing.s), verticalAlignment = Alignment.CenterVertically) {
         Icon(Icons.Default.CheckCircle, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
         Text(text, style = MaterialTheme.typography.bodyMedium)
     }
@@ -570,9 +559,9 @@ private fun Done(text: String) {
 @Composable
 private fun SpotProgress(measured: Int, measuring: Boolean) {
     val colors = MaterialTheme.colorScheme
-    Row(horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(horizontalArrangement = Arrangement.spacedBy(Spacing.l), verticalAlignment = Alignment.CenterVertically) {
         repeat(MAX_SPOTS) { i ->
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(horizontalArrangement = Arrangement.spacedBy(Spacing.xs), verticalAlignment = Alignment.CenterVertically) {
                 val (icon, tint) = when {
                     i < measured -> Icons.Default.CheckCircle to colors.primary
                     i == measured && measuring -> Icons.Default.Mic to colors.primary
@@ -589,7 +578,7 @@ private fun SpotProgress(measured: Int, measuring: Boolean) {
 private fun MeasureButton(measuring: Boolean, label: String, onClick: () -> Unit) {
     Button(onClick = onClick, enabled = !measuring) {
         Icon(Icons.Default.Mic, contentDescription = null, modifier = Modifier.size(18.dp))
-        Spacer(Modifier.width(8.dp))
+        Spacer(Modifier.width(Spacing.s))
         Text(if (measuring) "Listening…" else label)
     }
 }
@@ -633,14 +622,14 @@ private fun RoomPlot(r: RoomCorrection.Result, shapes: List<BandResponse>) {
 private fun ApproximateNote(text: String) {
     Row(verticalAlignment = Alignment.Top) {
         Icon(Icons.Default.Info, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 1.dp).size(16.dp))
-        Spacer(Modifier.width(6.dp))
+        Spacer(Modifier.width(Spacing.s))
         HintText(text)
     }
 }
 
 @Composable
 private fun PlotLegend(showTarget: Boolean) {
-    Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+    Row(horizontalArrangement = Arrangement.spacedBy(Spacing.l)) {
         Text("— Room", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         if (showTarget) Text("- - Aim", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.tertiary)
         Text("— With EQ", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)

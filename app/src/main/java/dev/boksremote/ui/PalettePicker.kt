@@ -1,11 +1,9 @@
 package dev.boksremote.ui
 
-import android.view.WindowManager
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -30,7 +28,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Check
@@ -38,14 +35,12 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DriveFileRenameOutline
 import androidx.compose.material.icons.filled.Palette
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.PlainTooltip
 import androidx.compose.material3.TooltipBox
@@ -60,34 +55,23 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
-import androidx.compose.ui.platform.LocalView
-import androidx.compose.ui.platform.LocalWindowInfo
-import androidx.compose.ui.text.TextRange
-import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.DialogWindowProvider
-import androidx.core.view.WindowCompat
-import androidx.core.view.WindowInsetsCompat
 import dev.boksremote.speaker.HsvColor
 import dev.boksremote.speaker.LightPalette
 import dev.boksremote.speaker.PaletteCodec
@@ -122,7 +106,7 @@ internal fun PaletteArt(colors: List<HsvColor>, modifier: Modifier = Modifier) {
 /** The four colours as dots on a dark chip, so they stay readable on top of the blended art. */
 @Composable
 private fun PaletteDots(colors: List<HsvColor>) {
-    Surface(shape = RoundedCornerShape(8.dp), color = Color.Black.copy(alpha = 0.7f)) {
+    Surface(shape = RoundedCornerShape(Corners.small), color = Scrim.label) {
         Column(Modifier.padding(5.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
             colors.chunked(2).forEach { row ->
                 Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
@@ -148,21 +132,21 @@ private fun PaletteCard(
     val outline = if (selected) MaterialTheme.colorScheme.primary else Color.Transparent
     Column(
         Modifier
-            .clip(RoundedCornerShape(16.dp))
-            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
-            .border(2.dp, outline, RoundedCornerShape(16.dp))
+            .clip(RoundedCornerShape(Corners.large))
+            .background(cardContainer)
+            .border(2.dp, outline, RoundedCornerShape(Corners.large))
             .combinedClickable(
                 onClick = onClick,
                 onLongClick = onLongClick?.let { { haptics.performHapticFeedback(HapticFeedbackType.LongPress); it() } },
                 onLongClickLabel = onLongClickLabel,
             )
-            .padding(6.dp),
+            .padding(Spacing.s),
     ) {
-        Box(Modifier.fillMaxWidth().aspectRatio(1.3f).clip(RoundedCornerShape(12.dp))) {
+        Box(Modifier.fillMaxWidth().aspectRatio(1.3f).clip(RoundedCornerShape(Corners.medium))) {
             PaletteArt(colors, Modifier.fillMaxSize())
-            Box(Modifier.align(Alignment.BottomEnd).padding(6.dp)) { badge() }
+            Box(Modifier.align(Alignment.BottomEnd).padding(Spacing.s)) { badge() }
             if (selected) {
-                Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primary, modifier = Modifier.align(Alignment.TopStart).padding(6.dp).size(22.dp)) {
+                Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primary, modifier = Modifier.align(Alignment.TopStart).padding(Spacing.s).size(22.dp)) {
                     Icon(Icons.Default.Check, contentDescription = "Active", tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.padding(3.dp))
                 }
             }
@@ -172,7 +156,7 @@ private fun PaletteCard(
             style = MaterialTheme.typography.titleSmall,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(start = 4.dp, end = 4.dp, top = 8.dp, bottom = 4.dp),
+            modifier = Modifier.padding(start = Spacing.xs, end = Spacing.xs, top = Spacing.s, bottom = Spacing.xs),
         )
     }
 }
@@ -184,9 +168,9 @@ private fun PaletteCard(
 @Composable
 private fun QuickActions(palette: LightPalette, actions: @Composable RowScope.() -> Unit) {
     Surface(shape = CircleShape, color = MaterialTheme.colorScheme.surfaceContainerHighest, shadowElevation = 6.dp) {
-        Row(Modifier.height(56.dp).padding(start = 12.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.height(56.dp).padding(start = Spacing.m, end = Spacing.xs), verticalAlignment = Alignment.CenterVertically) {
             PaletteArt(palette.colors, Modifier.size(28.dp).clip(CircleShape))
-            Spacer(Modifier.width(4.dp))
+            Spacer(Modifier.width(Spacing.xs))
             actions()
         }
     }
@@ -207,7 +191,7 @@ private fun QuickAction(icon: ImageVector, label: String, onClick: () -> Unit) {
 /** Names a group of palettes on the [PalettesPage]. */
 @Composable
 private fun GroupHeading(text: String, modifier: Modifier = Modifier) {
-    Text(text, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = modifier.padding(start = 4.dp))
+    Text(text, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = modifier.padding(start = Spacing.xs))
 }
 
 /**
@@ -255,7 +239,7 @@ fun PalettesPage(
         fromSide = true,
         top = { close ->
             IconButton(onClick = close) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
-            Text("Colour palettes", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(start = 4.dp))
+            Text("Colour palettes", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(start = Spacing.xs))
         },
     ) {
         Box(Modifier.weight(1f).navigationBarsPadding()) {
@@ -263,8 +247,8 @@ fun PalettesPage(
                 columns = GridCells.Adaptive(minSize = 104.dp),
                 // Room at the end for the button, so it never covers the last row.
                 contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 104.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
+                horizontalArrangement = Arrangement.spacedBy(Spacing.m),
+                verticalArrangement = Arrangement.spacedBy(Spacing.m),
                 modifier = Modifier.fillMaxSize(),
             ) {
                 item(key = "yours", span = { GridItemSpan(maxLineSpan) }) { GroupHeading("Your palettes") }
@@ -300,7 +284,7 @@ fun PalettesPage(
                         }
                     }
                 }
-                item(key = "presets", span = { GridItemSpan(maxLineSpan) }) { GroupHeading("Presets", Modifier.padding(top = 12.dp)) }
+                item(key = "presets", span = { GridItemSpan(maxLineSpan) }) { GroupHeading("Presets", Modifier.padding(top = Spacing.m)) }
                 item(key = "default") {
                     PaletteCard(
                         name = "Lightboks default",
@@ -308,7 +292,7 @@ fun PalettesPage(
                         selected = activeIsDefault,
                         onClick = onResetDefault,
                         badge = {
-                            Surface(shape = RoundedCornerShape(8.dp), color = Color.Black.copy(alpha = 0.7f)) {
+                            Surface(shape = RoundedCornerShape(Corners.small), color = Scrim.label) {
                                 Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = Color.White, modifier = Modifier.padding(5.dp).size(16.dp))
                             }
                         },
@@ -333,8 +317,8 @@ fun PalettesPage(
                     .background(Brush.verticalGradient(0f to Color.Transparent, 0.55f to MaterialTheme.colorScheme.surface, 1f to MaterialTheme.colorScheme.surface)),
             )
             Row(
-                Modifier.align(Alignment.BottomEnd).fillMaxWidth().padding(16.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.End),
+                Modifier.align(Alignment.BottomEnd).fillMaxWidth().padding(Spacing.l),
+                horizontalArrangement = Arrangement.spacedBy(Spacing.m, Alignment.End),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 val onLight = activeOwn ?: activePreset
@@ -344,7 +328,7 @@ fun PalettesPage(
                             QuickAction(Icons.Default.Palette, "Edit colours") { onEdit(activeOwn) }
                             QuickAction(Icons.Default.ContentCopy, "Duplicate") { onDuplicate(activeOwn) }
                             QuickAction(Icons.Default.DriveFileRenameOutline, "Rename") { renaming = activeOwn }
-                            Box(Modifier.padding(horizontal = 4.dp).width(1.dp).height(24.dp).background(MaterialTheme.colorScheme.outlineVariant))
+                            Box(Modifier.padding(horizontal = Spacing.xs).width(1.dp).height(24.dp).background(MaterialTheme.colorScheme.outlineVariant))
                             QuickAction(Icons.Default.Delete, "Delete") { delete(activeOwn) }
                         } else {
                             TextButton(onClick = { onDuplicate(onLight) }) { Text("Duplicate & edit") }
@@ -370,49 +354,7 @@ fun PalettesPage(
         }
 
         renaming?.let { p ->
-            PaletteNameDialog("Rename palette", p.name, "Rename", onDismiss = { renaming = null }) { onRename(p, it); renaming = null }
+            NameDialog("Rename palette", p.name, "Rename", PaletteCodec.MAX_NAME, placeholder = "My palette", onDismiss = { renaming = null }) { onRename(p, it); renaming = null }
         }
     }
-}
-
-@Composable
-internal fun PaletteNameDialog(
-    title: String,
-    initial: String,
-    confirm: String,
-    placeholder: String = "My palette",
-    onDismiss: () -> Unit,
-    onConfirm: (String) -> Unit,
-) {
-    // Starts selected, so typing replaces the old name and a tap in the field keeps it.
-    var name by remember { mutableStateOf(TextFieldValue(initial, TextRange(0, initial.length))) }
-    val focus = remember { FocusRequester() }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(title) },
-        text = {
-            // Focus alone leaves the keyboard closed in a dialog, above all one opened over a full-screen
-            // page, so its window is told to show it once the window has focus.
-            val view = LocalView.current
-            val windowInfo = LocalWindowInfo.current
-            LaunchedEffect(Unit) {
-                snapshotFlow { windowInfo.isWindowFocused }.first { it }
-                focus.requestFocus()
-                val window = (view.parent as? DialogWindowProvider)?.window
-                    ?: (view.parent?.parent as? DialogWindowProvider)?.window
-                window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE)
-                window?.let { WindowCompat.getInsetsController(it, view).show(WindowInsetsCompat.Type.ime()) }
-            }
-            OutlinedTextField(
-                value = name,
-                onValueChange = { name = it.copy(text = it.text.take(PaletteCodec.MAX_NAME)) },
-                label = { Text("Name") },
-                placeholder = { Text(placeholder) },
-                singleLine = true,
-                modifier = Modifier.focusRequester(focus),
-            )
-        },
-        confirmButton = { TextButton(onClick = { onConfirm(name.text.trim()) }) { Text(confirm) } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    )
 }

@@ -49,7 +49,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -134,11 +133,11 @@ internal fun LiveBadge(receiving: Boolean) {
         animationSpec = infiniteRepeatable(tween(700), RepeatMode.Reverse),
         label = "pulse",
     )
-    val color = if (receiving) Color(0xFF2E7D32) else MaterialTheme.colorScheme.tertiary
+    val color = if (receiving) liveColor else MaterialTheme.colorScheme.tertiary
     Surface(shape = CircleShape, color = color.copy(alpha = 0.15f)) {
-        Row(Modifier.padding(horizontal = 10.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.padding(horizontal = Spacing.s, vertical = Spacing.xs), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(8.dp).alpha(if (receiving) pulse else 1f).background(color, CircleShape))
-            Spacer(Modifier.width(6.dp))
+            Spacer(Modifier.width(Spacing.s))
             Text(if (receiving) "Live" else "Waiting", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = color)
         }
     }
@@ -148,9 +147,9 @@ internal fun LiveBadge(receiving: Boolean) {
 private fun BridgeStatusCard(status: DmxStatus, config: DmxConfig) {
     Card(
         Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHighest),
+        colors = CardDefaults.cardColors(containerColor = tileContainer),
     ) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Column(Modifier.padding(Spacing.l), verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
             val target = "${config.protocol.label} universe ${config.universe}"
             if (status.addresses.isEmpty()) {
                 Text("No Wi-Fi or hotspot connection", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.error)
@@ -185,7 +184,7 @@ private fun BridgeStatusCard(status: DmxStatus, config: DmxConfig) {
 
 @Composable
 private fun ConfigEditor(config: DmxConfig, onChange: (DmxConfig) -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(Spacing.s)) {
         ControlLabel("Protocol")
         Choice(DmxProtocol.entries, config.protocol, { it.label }) {
             // Each protocol counts universes differently; jump to its first universe when switching.
@@ -198,7 +197,7 @@ private fun ConfigEditor(config: DmxConfig, onChange: (DmxConfig) -> Unit) {
             NumberField("Universe", config.universe, config.protocol.universes, Modifier.weight(1f)) {
                 onChange(config.copy(universe = it))
             }
-            Spacer(Modifier.width(12.dp))
+            Spacer(Modifier.width(Spacing.m))
             NumberField("Start address", config.startAddress, 1..(513 - config.personality.footprint), Modifier.weight(1f)) {
                 onChange(config.copy(startAddress = it))
             }
@@ -230,9 +229,9 @@ private fun NumberField(label: String, value: Int, range: IntRange, modifier: Mo
 private fun ChannelMap(config: DmxConfig) {
     Card(
         Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHighest),
+        colors = CardDefaults.cardColors(containerColor = tileContainer),
     ) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Column(Modifier.padding(Spacing.l), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             config.personality.channels().forEachIndexed { i, name ->
                 Text("${config.startAddress + i}".padStart(3) + "  $name", fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
             }

@@ -4,9 +4,9 @@ import android.Manifest
 import android.os.SystemClock
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -46,7 +46,6 @@ import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -55,7 +54,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -72,44 +70,36 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.nestedScroll
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalHapticFeedback
-import androidx.compose.ui.semantics.CustomAccessibilityAction
-import androidx.compose.ui.semantics.customActions
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.zIndex
 import dev.boksremote.DevicePanel
 import dev.boksremote.speaker.CycleConfig
 import dev.boksremote.speaker.CycleStatus
 import dev.boksremote.speaker.CycleTransition
 import dev.boksremote.speaker.LightPalette
+import dev.boksremote.speaker.Unavailable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 @Composable
-fun CycleSection(panel: DevicePanel) {
+internal fun CycleSection(panel: DevicePanel, view: DeviceView) {
     val stage = panel.stage
     val cycle = stage.cycle
     val status by cycle.status.collectAsState()
     val config by cycle.config.collectAsState()
     val saved by panel.workspace.palettes.palettes.collectAsState()
-    val stageStatus by stage.status.collectAsState()
-    val lent = stageStatus.leased
+    // Cycle plays on the scene light, which may be leased while another Lightboks is open.
+    val lent = view.cycle == Unavailable.LEASED
     val large by cycle.largePreviews.collectAsState()
     val palettes = remember(config, saved) { cycle.palettes() }
     var editing by remember { mutableStateOf(false) }
     // Ask once so the "cycling" notice is visible; start either way.
     val notifications = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { stage.startCycle() }
-    val canStart = stageStatus.cycle == null
+    val canStart = view.cycle == null
 
     if (palettes.isNotEmpty()) {
         val current = status.current.takeIf { status.showing }
@@ -119,7 +109,7 @@ fun CycleSection(panel: DevicePanel) {
     val every = CycleConfig.intervalLabel(config.intervalSeconds)
     val s = status
     when {
-        lent -> HintText("Paused while the DMX bridge runs.")
+        lent -> HintText(Unavailable.LEASED.hint("Cycle"))
         s is CycleStatus.Running -> {
             val nextAt = s.nextAt
             if (nextAt == null) Text("Starting…", style = MaterialTheme.typography.bodyMedium)
@@ -139,7 +129,7 @@ fun CycleSection(panel: DevicePanel) {
         }
         // Paused by a palette picked by hand or by the bridge; either way it carries on where it was.
         s is CycleStatus.Paused -> HintText("Paused. Resume carries on with ${s.next}.")
-        palettes.size < CycleConfig.MIN_PALETTES -> HintText("Add at least two palettes to cycle through them.")
+        view.cycle != null -> HintText(view.cycle.hint("Cycle"))
         else -> HintText("${palettes.size} palettes, every $every, ${if (config.shuffle) "shuffled" else "in order"}. Keeps going with the screen off.")
     }
     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -158,7 +148,7 @@ fun CycleSection(panel: DevicePanel) {
         }
         // Stop starts the next run from the top; Pause keeps the place.
         if (status.running || status.paused) {
-            Spacer(Modifier.width(4.dp))
+            Spacer(Modifier.width(Spacing.xs))
             IconButton(onClick = stage::stopCycle) { Icon(Icons.Default.Stop, contentDescription = "Stop, next start from the beginning") }
         }
         if (status.running) {
@@ -196,8 +186,8 @@ private fun CycleStrip(palettes: List<LightPalette>, current: String?, paused: B
     // Wraps rather than scrolls, so the whole cycle is visible at a glance.
     FlowRow(
         Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(Spacing.s),
+        verticalArrangement = Arrangement.spacedBy(Spacing.s),
     ) {
         palettes.forEach { p ->
             PaletteArt(
@@ -205,11 +195,11 @@ private fun CycleStrip(palettes: List<LightPalette>, current: String?, paused: B
                 Modifier
                     .width(44.dp)
                     .height(32.dp)
-                    .clip(RoundedCornerShape(8.dp))
+                    .clip(RoundedCornerShape(Corners.small))
                     .clickable(enabled = enabled, onClickLabel = "Show ${p.name}") { onPick(p) }
                     .then(if (p.name == current) Modifier.tileOutline(MaterialTheme.colorScheme.primary, dashed = paused) else Modifier)
                     .padding(3.dp)
-                    .clip(RoundedCornerShape(5.dp)),
+                    .clip(RoundedCornerShape(Corners.small - 3.dp)),
             )
         }
     }
@@ -223,15 +213,15 @@ private const val GRID_COLUMNS = 3
  */
 @Composable
 private fun CycleGrid(palettes: List<LightPalette>, current: String?, paused: Boolean, enabled: Boolean, onPick: (LightPalette) -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(Spacing.s)) {
         palettes.chunked(GRID_COLUMNS).forEach { row ->
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(Spacing.s)) {
                 row.forEach { p ->
                     val on = p.name == current
                     Column(
                         Modifier
                             .weight(1f)
-                            .clip(RoundedCornerShape(12.dp))
+                            .clip(RoundedCornerShape(Corners.medium))
                             .clickable(enabled = enabled, onClickLabel = "Show ${p.name}") { onPick(p) },
                     ) {
                         PaletteArt(
@@ -239,10 +229,10 @@ private fun CycleGrid(palettes: List<LightPalette>, current: String?, paused: Bo
                             Modifier
                                 .fillMaxWidth()
                                 .aspectRatio(1.4f)
-                                .clip(RoundedCornerShape(12.dp))
-                                .then(if (on) Modifier.tileOutline(MaterialTheme.colorScheme.primary, dashed = paused, corner = 12.dp) else Modifier)
+                                .clip(RoundedCornerShape(Corners.medium))
+                                .then(if (on) Modifier.tileOutline(MaterialTheme.colorScheme.primary, dashed = paused, corner = Corners.medium) else Modifier)
                                 .padding(if (on) 4.dp else 0.dp)
-                                .clip(RoundedCornerShape(if (on) 8.dp else 12.dp)),
+                                .clip(RoundedCornerShape(if (on) Corners.small else Corners.medium)),
                         )
                         Text(
                             p.name,
@@ -250,7 +240,7 @@ private fun CycleGrid(palettes: List<LightPalette>, current: String?, paused: Bo
                             color = if (on) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.padding(start = 2.dp, top = 6.dp, bottom = 2.dp),
+                            modifier = Modifier.padding(start = 2.dp, top = Spacing.s, bottom = 2.dp),
                         )
                     }
                 }
@@ -261,7 +251,7 @@ private fun CycleGrid(palettes: List<LightPalette>, current: String?, paused: Bo
     }
 }
 
-private fun Modifier.tileOutline(color: Color, dashed: Boolean, corner: Dp = 8.dp): Modifier =
+private fun Modifier.tileOutline(color: Color, dashed: Boolean, corner: Dp = Corners.small): Modifier =
     if (!dashed) border(2.dp, color, RoundedCornerShape(corner)) else drawBehind {
         val width = 2.dp.toPx()
         // The stroke is centred on its path, so the path sits half a stroke inside the tile.
@@ -312,12 +302,12 @@ private fun CycleEditorSheet(
 
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), modifier = Modifier.sheetTopMargin()) {
         Box {
-            Column(Modifier.nestedScroll(KeepListFling).verticalScroll(rememberScrollState()).navigationBarsPadding().padding(bottom = 16.dp)) {
-                Text("Cycle", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(horizontal = 24.dp))
-                Spacer(Modifier.height(16.dp))
-                Column(Modifier.padding(horizontal = 24.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(Modifier.nestedScroll(KeepListFling).verticalScroll(rememberScrollState()).navigationBarsPadding().padding(bottom = Spacing.l)) {
+                Text("Cycle", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(horizontal = Spacing.xl))
+                Spacer(Modifier.height(Spacing.l))
+                Column(Modifier.padding(horizontal = Spacing.xl), verticalArrangement = Arrangement.spacedBy(Spacing.s)) {
                     ControlLabel("Change every")
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(Spacing.s)) {
                         CycleConfig.INTERVALS.forEach { s ->
                             FilterChip(
                                 selected = config.intervalSeconds == s,
@@ -327,7 +317,7 @@ private fun CycleEditorSheet(
                         }
                     }
                     ControlLabel("Transition")
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(Spacing.s)) {
                         CycleTransition.entries.forEach { t ->
                             FilterChip(
                                 selected = config.transition == t,
@@ -337,7 +327,7 @@ private fun CycleEditorSheet(
                         }
                     }
                     ControlLabel("Previews in the card")
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(Spacing.s)) {
                         listOf(false to "Small", true to "Large").forEach { (on, label) ->
                             FilterChip(selected = largePreviews == on, onClick = { onLargePreviews(on) }, label = { Text(label) })
                         }
@@ -350,13 +340,13 @@ private fun CycleEditorSheet(
                         Switch(checked = config.shuffle, onCheckedChange = { onChange(config.copy(shuffle = it)) })
                     }
                 }
-                Spacer(Modifier.height(16.dp))
+                Spacer(Modifier.height(Spacing.l))
                 SheetHeading(
                     if (config.shuffle) "In the cycle (${inCycle.size})" else "In the cycle (${inCycle.size}), in play order",
                     action = if (inCycle.isNotEmpty()) "Remove all" to ::removeAll else null,
                 )
                 if (inCycle.isEmpty()) {
-                    HintText("Add palettes from the list below.", Modifier.padding(horizontal = 24.dp, vertical = 8.dp))
+                    HintText("Add palettes from the list below.", Modifier.padding(horizontal = Spacing.xl, vertical = Spacing.s))
                 }
                 ReorderableRows(
                     items = inCycle,
@@ -392,12 +382,12 @@ private val KeepListFling = object : NestedScrollConnection {
 /** A list heading, with an optional text button at its end such as "Add all". */
 @Composable
 private fun SheetHeading(text: String, action: Pair<String, () -> Unit>? = null) {
-    Row(Modifier.fillMaxWidth().padding(start = 24.dp, end = 12.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().padding(start = Spacing.xl, end = Spacing.m, top = Spacing.s), verticalAlignment = Alignment.CenterVertically) {
         Text(
             text,
             style = MaterialTheme.typography.titleSmall,
             color = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.weight(1f).padding(vertical = 12.dp),
+            modifier = Modifier.weight(1f).padding(vertical = Spacing.m),
         )
         action?.let { (label, onClick) -> TextButton(onClick = onClick) { Text(label) } }
     }
@@ -405,10 +395,10 @@ private fun SheetHeading(text: String, action: Pair<String, () -> Unit>? = null)
 
 @Composable
 private fun PaletteRow(p: LightPalette, modifier: Modifier = Modifier, leading: @Composable () -> Unit = {}, trailing: @Composable () -> Unit) {
-    Row(modifier.fillMaxWidth().height(ROW_HEIGHT).padding(start = 12.dp, end = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(modifier.fillMaxWidth().height(ROW_HEIGHT).padding(start = Spacing.m, end = Spacing.m), verticalAlignment = Alignment.CenterVertically) {
         leading()
-        PaletteArt(p.colors, Modifier.width(52.dp).height(38.dp).clip(RoundedCornerShape(8.dp)))
-        Spacer(Modifier.width(12.dp))
+        PaletteArt(p.colors, Modifier.width(52.dp).height(38.dp).clip(RoundedCornerShape(Corners.small)))
+        Spacer(Modifier.width(Spacing.m))
         Text(p.name, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
         trailing()
     }
@@ -418,81 +408,25 @@ private fun PaletteRow(p: LightPalette, modifier: Modifier = Modifier, leading: 
 private fun AddRow(p: LightPalette, onAdd: () -> Unit) {
     // Indented like the handle on the rows above, so the thumbnails line up.
     PaletteRow(p, Modifier.clickable(onClickLabel = "Add to cycle", onClick = onAdd), leading = { Spacer(Modifier.width(48.dp)) }) {
-        Icon(Icons.Default.AddCircleOutline, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(12.dp))
+        Icon(Icons.Default.AddCircleOutline, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(Spacing.m))
     }
 }
 
-/**
- * Rows reordered by dragging their handle. Rows have one fixed height, so the dragged row swaps with
- * its neighbour once it has moved half a row; TalkBack users get Move up / Move down actions instead.
- */
+/** The palettes in the cycle, reordered by their handle and removed by the button at their end. */
 @Composable
 private fun ReorderableRows(items: List<LightPalette>, onMove: (from: Int, to: Int) -> Unit, onRemove: (LightPalette) -> Unit) {
-    val rowPx = with(LocalDensity.current) { ROW_HEIGHT.toPx() }
-    val haptics = LocalHapticFeedback.current
-    val latest by rememberUpdatedState(items)
-    val move by rememberUpdatedState(onMove)
-    var dragging by remember { mutableStateOf<String?>(null) }
-    var offset by remember { mutableFloatStateOf(0f) }
-
-    items.forEachIndexed { i, p ->
-        // Keyed by name so the row, and the drag in progress on it, follows the palette to its new place.
-        key(p.name) {
-            val lifted = dragging == p.name
-            Surface(
-                color = if (lifted) MaterialTheme.colorScheme.surfaceContainerHighest else Color.Transparent,
-                shadowElevation = if (lifted) 6.dp else 0.dp,
-                modifier = Modifier
-                    .zIndex(if (lifted) 1f else 0f)
-                    .graphicsLayer { translationY = if (lifted) offset else 0f }
-                    .semantics {
-                        customActions = listOfNotNull(
-                            if (i > 0) CustomAccessibilityAction("Move up") { onMove(i, i - 1); true } else null,
-                            if (i < items.lastIndex) CustomAccessibilityAction("Move down") { onMove(i, i + 1); true } else null,
-                        )
-                    },
-            ) {
-                PaletteRow(
-                    p,
-                    leading = {
-                        Box(
-                            Modifier
-                                .padding(end = 4.dp)
-                                .size(44.dp)
-                                .pointerInput(p.name) {
-                                    detectDragGestures(
-                                        onDragStart = {
-                                            dragging = p.name
-                                            offset = 0f
-                                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                                        },
-                                        onDragEnd = { dragging = null; offset = 0f },
-                                        onDragCancel = { dragging = null; offset = 0f },
-                                    ) { change, amount ->
-                                        change.consume()
-                                        offset += amount.y
-                                        val at = latest.indexOfFirst { it.name == p.name }
-                                        if (offset > rowPx / 2 && at < latest.lastIndex) {
-                                            move(at, at + 1)
-                                            offset -= rowPx
-                                            haptics.performHapticFeedback(HapticFeedbackType.SegmentTick)
-                                        } else if (offset < -rowPx / 2 && at > 0) {
-                                            move(at, at - 1)
-                                            offset += rowPx
-                                            haptics.performHapticFeedback(HapticFeedbackType.SegmentTick)
-                                        }
-                                    }
-                                },
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Icon(Icons.Default.DragHandle, contentDescription = "Drag to reorder", tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                    },
-                ) {
-                    IconButton(onClick = { onRemove(p) }) {
-                        Icon(Icons.Default.RemoveCircleOutline, contentDescription = "Remove ${p.name} from cycle", tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
+    ReorderableColumn(items, { it.name }, ROW_HEIGHT, onMove) { p, handle, lifted ->
+        PaletteRow(
+            p,
+            Modifier.background(if (lifted) tileContainer else Color.Transparent),
+            leading = {
+                Box(Modifier.padding(end = Spacing.xs).size(44.dp).then(handle), contentAlignment = Alignment.Center) {
+                    Icon(Icons.Default.DragHandle, contentDescription = "Drag to reorder", tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
+            },
+        ) {
+            IconButton(onClick = { onRemove(p) }) {
+                Icon(Icons.Default.RemoveCircleOutline, contentDescription = "Remove ${p.name} from cycle", tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
     }
