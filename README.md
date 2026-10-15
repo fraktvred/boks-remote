@@ -33,10 +33,10 @@ Bluetooth LE only, with no account and no cloud.</p>
 > **Not affiliated with SOUNDBOKS.** Boks Remote is an unofficial community project, not made, endorsed or supported by SOUNDBOKS ApS. "SOUNDBOKS" and "Lightboks" are trademarks of their owner and are used here only to say which devices the app works with. Use it at your own risk.
 
 <p align="center">
-  <img src="docs/screenshots/custom-eq.png" width="160" alt="Speaker screen with volume and a custom six-band EQ curve">
-  <img src="docs/screenshots/room-tuning.png" width="160" alt="Room tuning wizard">
-  <img src="docs/screenshots/lightboks.png" width="160" alt="Lightboks screen with brightness, light mode, the scene in use and its colours">
-  <img src="docs/screenshots/palette-editor.png" width="160" alt="Palette editor with a live preview on the light">
+  <img src="docs/screenshots/custom-eq.png" width="24%" alt="Speaker screen with volume and a custom six-band EQ curve">
+  <img src="docs/screenshots/room-tuning.png" width="24%" alt="Room tuning wizard">
+  <img src="docs/screenshots/lightboks.png" width="24%" alt="Lightboks screen with brightness, light mode, the scene in use and its colours">
+  <img src="docs/screenshots/palette-editor.png" width="24%" alt="Palette editor with a live preview on the light">
 </p>
 
 ## Install
