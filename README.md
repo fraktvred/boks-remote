@@ -33,10 +33,11 @@ Bluetooth LE only, with no account and no cloud.</p>
 > **Not affiliated with SOUNDBOKS.** Boks Remote is an unofficial community project, not made, endorsed or supported by SOUNDBOKS ApS. "SOUNDBOKS" and "Lightboks" are trademarks of their owner and are used here only to say which devices the app works with. Use it at your own risk.
 
 <p align="center">
-  <img src="docs/screenshots/custom-eq.png" width="24%" alt="Speaker screen with volume and a custom six-band EQ curve">
-  <img src="docs/screenshots/room-tuning.png" width="24%" alt="Room tuning wizard">
-  <img src="docs/screenshots/lightboks.png" width="24%" alt="Lightboks screen with brightness, light mode, the scene in use and its colours">
-  <img src="docs/screenshots/palette-editor.png" width="24%" alt="Palette editor with a live preview on the light">
+  <img src="docs/screenshots/devices.png" width="19%" alt="Device list with quick settings under a Lightboks and a speaker">
+  <img src="docs/screenshots/custom-eq.png" width="19%" alt="Speaker screen with volume, sound profiles and a custom six-band EQ">
+  <img src="docs/screenshots/room-tuning.png" width="19%" alt="Room tuning wizard">
+  <img src="docs/screenshots/lightboks.png" width="19%" alt="Lightboks screen with brightness in the light's colours, light mode, the scene in use and its palette">
+  <img src="docs/screenshots/palette-editor.png" width="19%" alt="Palette editor with a live preview on the light">
 </p>
 
 ## Install
@@ -53,7 +54,7 @@ Every release is signed with the same key, so a newer APK installs over the old 
 
 ## Features
 
-Speakers and the Lightboks each get a screen with the controls their hardware has. **Demo mode** (⋮ on the device list) shows both without the hardware.
+Speakers and the Lightboks each get a screen with the controls their hardware has, and **quick settings** right on the device list: volume and sound profiles for a speaker, brightness, light mode and palette for a Lightboks. **Demo mode** (⋮ on the device list) shows both without the hardware.
 
 ### SOUNDBOKS speakers
 

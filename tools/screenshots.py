@@ -1,17 +1,19 @@
 #!/usr/bin/env python3
 """Retakes the README screenshots on a phone over adb.
 
-Needs a SOUNDBOKS speaker and a Lightboks switched on near the phone, and macOS (crops with sips).
-Builds and installs a release build (so no debug tools show), steps through the app and writes
-docs/screenshots/<shot>.png, 540 px wide, without the status and navigation bars.
+Shoots demo mode's dummy Mix and Lightboks, so no hardware is needed, only a phone and macOS (crops
+with sips). Builds and installs a release build (so no debug tools show), switches demo mode on,
+steps through the app and writes docs/screenshots/<shot>.png, 540 px wide, without the status and
+navigation bars.
 
-Devices advertise their team ID as their name. The shots show stand-ins from local.properties:
+Real devices nearby still show on the device list, by their team ID. To show stand-ins instead, set
+them in local.properties:
 
     screenshot.names=<team ID>=Backyard Mix;<team ID>=Stage light
 
 Usage: tools/screenshots.py [shot ...]   (default: all of them)
 
-Custom EQ switches the speaker to Custom for its shot and back to its sound profile afterwards.
+Custom EQ switches the dummy Mix to Custom for its shot and back to its sound profile afterwards.
 Reinstall your debug build when done (./gradlew installDebug).
 """
 import html
@@ -35,6 +37,7 @@ def adb(*args: str, binary: bool = False):
 class Node:
     def __init__(self, attrs: str):
         self.text = html.unescape(re.search(r' text="([^"]*)"', attrs).group(1))
+        self.desc = html.unescape(re.search(r' content-desc="([^"]*)"', attrs).group(1))
         self.checked = ' checked="true"' in attrs
         self.left, self.top, self.right, self.bottom = map(int, re.search(r'bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', attrs).groups())
         self.center = ((self.left + self.right) // 2, (self.top + self.bottom) // 2)
@@ -55,7 +58,10 @@ def nodes() -> list[Node]:
 
 
 def find(text: str, exact: bool = True) -> Node | None:
-    return next((n for n in nodes() if (n.text == text if exact else text in n.text)), None)
+    """The first view whose text, or else whose content description, is [text]."""
+    def matches(s: str) -> bool:
+        return s == text if exact else text in s
+    return next((n for n in nodes() if matches(n.text) or matches(n.desc)), None)
 
 
 def wait_for(text: str, exact: bool = True, timeout: float = 30) -> Node:
@@ -115,27 +121,35 @@ def shot(name: str, work: Path):
     print(f"  {name}.png")
 
 
-def open_device(kind: str):
-    """From the device list, opens the speaker ("SOUNDBOKS") or the Lightboks and waits for its controls."""
-    wait_for("Scan again", timeout=40)  # tapping during a scan races the list's updates
-    tap(kind, exact=False)
-    wait_for("Volume" if kind == "SOUNDBOKS" else "Brightness", timeout=40)
+SPEAKER = "Demo Mix"
+LIGHT = "Demo Lightboks"
+
+
+def open_device(name: str):
+    """From the device list, opens a dummy and waits for its controls."""
+    tap(name)
+    # The list's quick settings have a Volume and a Brightness of their own, so first wait for the screen.
+    wait_for("Back to device list")
+    wait_for("Volume" if name == SPEAKER else "Brightness", timeout=40)
 
 
 def take(shots: list[str], work: Path):
     adb("shell", "am", "force-stop", "dev.boksremote")
     adb("shell", "monkey", "-p", "dev.boksremote", "-c", "android.intent.category.LAUNCHER", "1")
+    # A release build starts with demo mode off, and doesn't keep it across restarts.
+    wait_for("More options")
+    if not find(SPEAKER):
+        tap("More options")
+        tap("Demo mode")
+    wait_for(SPEAKER)
+    wait_for(LIGHT)
     if "devices" in shots:
-        # Taken mid-scan, with the spinner going; the screen can't be read until the scan ends, so
-        # the check that both devices made it into the shot comes afterwards.
-        time.sleep(8)
+        time.sleep(2)  # the dummies connect, then their quick settings show
         shot("devices", work)
-    wait_for("SOUNDBOKS", exact=False)
-    wait_for("Lightboks", exact=False)
 
     speaker_shots = [s for s in ("speaker", "custom-eq", "room-tuning") if s in shots]
     if speaker_shots:
-        open_device("SOUNDBOKS")
+        open_device(SPEAKER)
         if "speaker" in shots:
             shot("speaker", work)
         if "custom-eq" in shots:
@@ -152,12 +166,12 @@ def take(shots: list[str], work: Path):
             tap("Start")
             wait_for("Where is the speaker?")
             shot("room-tuning", work)
-            back()
+            tap("Close")  # Back would only step back through the wizard
         back()
 
     light_shots = [s for s in ("lightboks", "palettes", "palette-editor", "dmx-bridge") if s in shots]
     if light_shots:
-        open_device("Lightboks")
+        open_device(LIGHT)
         if "lightboks" in shots:
             shot("lightboks", work)
         if "palettes" in shots:
@@ -173,7 +187,7 @@ def take(shots: list[str], work: Path):
             label = wait_for("Main 1")
             x, _ = label.center
             adb("shell", "input", "tap", str(x), str(label.top - 60))
-            wait_for("Preview on the light")
+            wait_for("Live on the light")
             shot("palette-editor", work)
             back()  # discards the draft and puts the light's palette back
         if "dmx-bridge" in shots:
@@ -199,11 +213,10 @@ def main():
 
     props = (ROOT / "local.properties").read_text() if (ROOT / "local.properties").exists() else ""
     names = re.search(r"^screenshot\.names=(.*)$", props, re.M)
-    if not names:
-        sys.exit("add screenshot.names=<team ID>=<name shown>;… to local.properties, so no team IDs show")
+    stand_ins = [f"-Pboksremote.screenshotNames={names.group(1).strip()}"] if names else []
 
     print("Building and installing a release build…")
-    subprocess.run(["./gradlew", "-q", "installRelease", f"-Pboksremote.screenshotNames={names.group(1).strip()}"], cwd=ROOT, check=True)
+    subprocess.run(["./gradlew", "-q", "installRelease", *stand_ins], cwd=ROOT, check=True)
     with tempfile.TemporaryDirectory() as work:
         take(shots, Path(work))
     print("Done. Reinstall your debug build with ./gradlew installDebug.")
