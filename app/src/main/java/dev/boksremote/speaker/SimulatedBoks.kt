@@ -267,7 +267,6 @@ class SimulatedBoks(
             "SetEqMode" -> d.eq?.let { ok.also { device = d.copy(eq = EqMode.entries.getOrNull(r.int(1))) } }
             "GetEqBands" -> d.eqBands?.let { proto { uint32(1, EqCurve.BANDS); bytes(2, EqCurve.toWire(it)) } }
             "SetEqBands" -> d.eqBands?.let { ok.also { device = d.copy(eqBands = EqCurve.fromWire(r.bytes(2))) } }
-            "SetInputConfig" -> ok.takeIf { family == Family.BIFROST }
             "GetActivePalette" -> if (d.paletteIsDefault || d.palette == null) proto { int32(1, 0) } else LightContentCodec.palette(d.palette, UUID(0, 1))
             "SetActivePalette" -> lightOnly { LightContentCodec.parsePalette(r)?.let { device = d.copy(palette = it, paletteIsDefault = false) } }
             "ResetActiveColorPalette" -> lightOnly { device = d.copy(palette = null, paletteIsDefault = true) }
@@ -330,7 +329,7 @@ class SimulatedBoks(
             "DeviceInformationService/GetName", "DeviceInformationService/SetName",
             "SystemService/GetAutoOff", "SystemService/SetAutoOff", "SystemService/PowerOff",
             "AudioControlService/GetEqMode", "AudioControlService/SetEqMode", "AudioControlService/GetEqBands",
-            "AudioControlService/SetEqBands", "AudioControlService/SetInputConfig",
+            "AudioControlService/SetEqBands",
             "LightContentService/GetActivePalette", "LightContentService/SetActivePalette",
             "LightContentService/ResetActiveColorPalette", "LightContentService/SetAnimation",
             "LightContentService/SetCustomProgram",

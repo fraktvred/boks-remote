@@ -380,22 +380,6 @@ class SpeakerController(
         eqWrites.trySend(EqWrite(EqMode.USER, bandsDb))
     }
 
-    /** AUX input gain in dB (AudioControlService.SetInputConfig). Accepted by the Mix, effect unverified. */
-    suspend fun setAuxGain(db: Float) = setAuxInput { message(2) { message(1) { float(1, db) } } }
-
-    /** AUX input EQ, bands in dB. The band count isn't reported by the speaker. */
-    suspend fun setAuxEq(bandsDb: List<Float>) = setAuxInput {
-        val packed = java.nio.ByteBuffer.allocate(4 * bandsDb.size).order(java.nio.ByteOrder.LITTLE_ENDIAN)
-        bandsDb.forEach { packed.putFloat(it) }
-        message(3) { message(1) { bytes(1, packed.array()) } }
-    }
-
-    private suspend fun setAuxInput(config: dev.boksremote.proto.ProtoWriter.() -> Unit) {
-        // InputConfigMessage{input: {type: AUX, index: 0}, configs: [config]}
-        val r = call("AudioControlService", "SetInputConfig", proto { message(1) { int32(1, 0); uint32(2, 0) }; message(2, config) })
-        if (r.int(1) != 0) throw IllegalStateException("speaker rejected the input setting")
-    }
-
     fun setName(name: String) = control("name") {
         call("DeviceInformationService", "SetName", proto { string(1, name) })
         _state.update { it.copy(name = name) }

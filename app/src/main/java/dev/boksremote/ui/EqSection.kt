@@ -9,7 +9,6 @@ import androidx.core.content.ContextCompat
 import dev.boksremote.speaker.PaletteCodec
 import dev.boksremote.audio.BandCalibration
 import dev.boksremote.audio.BandModels
-import dev.boksremote.audio.InputProbe
 import dev.boksremote.audio.RoomMeter
 import kotlinx.coroutines.launch
 import java.io.File
@@ -403,11 +402,7 @@ internal fun RoomTuning(s: SpeakerState, speaker: SpeakerController, store: EqPr
     val context = LocalContext.current
     if (context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE == 0) return
     val calibrationCsv = File(context.getExternalFilesDir(null), "bandcal.csv")
-    // Kept together, so they don't each take the page's spacing between cards.
-    Column {
-        DebugTool("Calibrate bands (debug)", speaker) { sp, meter, progress -> BandCalibration.run(sp, meter, calibrationCsv, progress) }
-        DebugTool("Probe AUX input (debug)", speaker, InputProbe::run)
-    }
+    DebugTool("Calibrate bands (debug)", speaker) { sp, meter, progress -> BandCalibration.run(sp, meter, calibrationCsv, progress) }
 }
 
 @Composable
