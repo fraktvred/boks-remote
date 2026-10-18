@@ -13,6 +13,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -22,6 +23,7 @@ import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.LifecycleStartEffect
+import dev.boksremote.speaker.PrefsKeyValue
 import dev.boksremote.ui.AppTheme
 import dev.boksremote.ui.PermissionScreen
 import dev.boksremote.ui.ScanScreen
@@ -70,6 +72,7 @@ private fun App(app: BoksApp) {
     val speaker by app.speaker.collectAsState()
     val demoMode by app.demoMode.collectAsState()
     val current = speaker
+    RemotePermissionPrompt(opened = current != null)
     if (current == null) {
         ScanScreen(app, demoMode, onDemoModeChange = app::setDemoMode, onOpen = app::open, onOpenDemo = app::openDemo)
     } else {
@@ -77,3 +80,23 @@ private fun App(app: BoksApp) {
         SpeakerScreen(remember(current) { app.panelOf(current) }, onBack = app::close)
     }
 }
+
+/**
+ * The first time a device is [opened], asks to post notifications, so its remote shows. Only once:
+ * after that the Cycle and DMX bridge buttons still ask, where the notice matters most.
+ */
+@Composable
+private fun RemotePermissionPrompt(opened: Boolean) {
+    val context = LocalContext.current
+    val prefs = remember { PrefsKeyValue(context, "prompts") }
+    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
+    LaunchedEffect(opened) {
+        if (!opened || prefs[REMOTE_PROMPT_KEY] != null) return@LaunchedEffect
+        prefs[REMOTE_PROMPT_KEY] = "asked"
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            launcher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
+}
+
+private const val REMOTE_PROMPT_KEY = "remote_notifications"

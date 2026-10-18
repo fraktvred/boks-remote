@@ -100,7 +100,8 @@ Speakers and the Lightboks each get a screen with the controls their hardware ha
 - **Scenes:** brightness, light mode, palette and Cycle back with one tap. The scene in use saves your changes by itself.
 - **Sleep fade:** dim to dark over 15, 30 or 60 minutes, then switch off.
 - **Effects pad:** hold an effect or slide up to lock it. **Drop** blacks out while held and strobes on release.
-- **Quick Settings tile** for Cycle, and a Stop notification while anything runs with the screen off.
+- **Notification remote:** volume and mute for the open speaker, brightness and Cycle for the light, from the shade or the lock screen.
+- **Quick Settings tile** for Cycle, and a Stop action in the notification while anything runs with the screen off.
 
 Firmware updates, registration and anti-theft lock need SOUNDBOKS's servers, so they stay in the official app. Saved EQs stay on the phone rather than syncing to a SOUNDBOKS account.
 
@@ -131,7 +132,7 @@ Boks Remote has no account, analytics or cloud connection. Owner pincodes, palet
 | --- | --- |
 | Nearby devices (Bluetooth scan and connect) | Finding and controlling speakers. The scan is declared as not used for location, so no location permission is asked for. |
 | Microphone | Room tuning only, while a measurement runs. |
-| Notifications | The status notification with its Stop action while the DMX bridge, Cycle or Sleep fade runs. |
+| Notifications | The remote notification while a device is open, and its Stop action while the DMX bridge, Cycle or Sleep fade runs. Asked for once, the first time a device is opened. |
 | Network, Wi-Fi multicast, foreground service, wake lock | Receiving Art-Net/sACN for the DMX bridge, and keeping it, Cycle and Sleep fade running with the screen off. |
 
 ## Status

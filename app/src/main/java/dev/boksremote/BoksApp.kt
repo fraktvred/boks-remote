@@ -36,7 +36,7 @@ import kotlinx.coroutines.launch
 /**
  * Process-wide owner of the device list, the scene in use, the DMX bridge, Cycle and Sleep fade. They live here rather than in a
  * ViewModel so they keep running when the activity is closed; [LightSessionService] keeps the
- * process in the foreground meanwhile.
+ * process in the foreground meanwhile, and the open device connected, with a remote for both.
  */
 class BoksApp : Application() {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -109,9 +109,11 @@ class BoksApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
-        // One foreground service covers them all; it runs while any of them does. A dummy's run in the app alone.
+        // One foreground service covers them all, and the open device, whose remote its notification carries; it runs
+        // while any of them does. A dummy's Cycle and Sleep fade run in the app alone. A device is only ever opened
+        // from the app on screen, where Android lets the service start.
         scope.launch {
-            combine(bridge.status, own.stage.cycle.status, own.stage.sleep) { b, c, s -> b.running || c.running || s.running }
+            combine(bridge.status, own.stage.cycle.status, own.stage.sleep, list.open) { b, c, s, open -> b.running || c.running || s.running || open != null }
                 .distinctUntilChanged()
                 .drop(1) // the initial "neither runs"
                 .collect { active ->
@@ -190,6 +192,12 @@ class BoksApp : Application() {
         workspaceOf(closing).stage.stopSleep()
         list.close()
     }
+
+    /**
+     * Lets go of the open device alone, from its remote: unlike [close], the DMX bridge and Sleep fade
+     * carry on. A device the bridge or Cycle holds stays connected for them.
+     */
+    fun detach() = list.close()
 
     private fun updateDmxConfig(config: DmxConfig) {
         _dmxConfig.value = config
