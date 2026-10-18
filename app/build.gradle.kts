@@ -12,8 +12,8 @@ android {
         applicationId = "dev.boksremote"
         minSdk = 33 // the value-carrying BluetoothGatt callbacks and write APIs used throughout are API 33+
         targetSdk = 36
-        versionCode = 5
-        versionName = "0.4.1"
+        versionCode = 6
+        versionName = "0.5.0"
         // Stand-in device names for README screenshots, e.g. "<team ID>=Backyard Mix;<team ID>=Stage light",
         // so the shots don't show anyone's team ID. Set by tools/screenshots.py; empty otherwise.
         val screenshotNames = (findProperty("boksremote.screenshotNames") as String?).orEmpty()
