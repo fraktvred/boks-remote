@@ -14,6 +14,7 @@ import android.widget.RemoteViews
 import dev.boksremote.dmx.DmxConfig
 import dev.boksremote.dmx.DmxStatus
 import dev.boksremote.speaker.CycleConfig
+import dev.boksremote.speaker.ConnectionState
 import dev.boksremote.speaker.CycleStatus
 import dev.boksremote.speaker.SleepStatus
 import dev.boksremote.speaker.SpeakerController
@@ -101,9 +102,11 @@ class LightSessionService : Service() {
         }
     }
 
-    private fun row(device: SpeakerController, target: RemoteTarget, bridge: Flow<String>): Flow<RemoteRow> {
+    /** None once [device] drops, so a lost connection leaves the notification. */
+    private fun row(device: SpeakerController, target: RemoteTarget, bridge: Flow<String>): Flow<RemoteRow?> {
         val stage = app.panelOf(device).stage
         return combine(device.state, stage.status, stage.cycle.status, stage.light, bridge) { s, status, cycle, light, bridgeText ->
+            if (s.connection == ConnectionState.DISCONNECTED || s.connection == ConnectionState.FAILED) return@combine null
             val scene = light === device
             remoteRow(target, deviceView(s, status, scene, cycle), cycle, scene, bridgeText)
         }

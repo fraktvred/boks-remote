@@ -10,6 +10,7 @@ import dev.boksremote.dmx.DmxConfig
 import dev.boksremote.dmx.DmxConfigStore
 import dev.boksremote.protocol.Advertisement
 import dev.boksremote.protocol.Family
+import dev.boksremote.speaker.ConnectionState
 import dev.boksremote.speaker.DemoDevice
 import dev.boksremote.speaker.KeepAwake
 import dev.boksremote.speaker.MemoryKeyValue
@@ -21,6 +22,7 @@ import dev.boksremote.speaker.WakeLockKeepAwake
 import dev.boksremote.speaker.Workspace
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.job
@@ -30,6 +32,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -38,6 +43,7 @@ import kotlinx.coroutines.launch
  * ViewModel so they keep running when the activity is closed; [LightSessionService] keeps the
  * process in the foreground meanwhile, and the open device connected, with a remote for both.
  */
+@OptIn(ExperimentalCoroutinesApi::class)
 class BoksApp : Application() {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     val scanner by lazy { Scanner(this) }
@@ -113,7 +119,11 @@ class BoksApp : Application() {
         // while any of them does. A dummy's Cycle and Sleep fade run in the app alone. A device is only ever opened
         // from the app on screen, where Android lets the service start.
         scope.launch {
-            combine(bridge.status, own.stage.cycle.status, own.stage.sleep, list.open) { b, c, s, open -> b.running || c.running || s.running || open != null }
+            // The open device counts until it drops, so its notification goes with the connection.
+            val openLive = list.open.flatMapLatest { open ->
+                open?.state?.map { it.connection == ConnectionState.CONNECTING || it.connection == ConnectionState.CONNECTED } ?: flowOf(false)
+            }
+            combine(bridge.status, own.stage.cycle.status, own.stage.sleep, openLive) { b, c, s, open -> b.running || c.running || s.running || open }
                 .distinctUntilChanged()
                 .drop(1) // the initial "neither runs"
                 .collect { active ->
